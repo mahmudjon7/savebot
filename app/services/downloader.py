@@ -3,12 +3,29 @@
 import asyncio
 import logging
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 import yt_dlp
 
 logger = logging.getLogger(__name__)
+
+
+def _find_binary(name: str) -> str:
+    """Find binary in PATH or common fallback locations."""
+    path = shutil.which(name)
+    if path:
+        return path
+    for cand in (
+        os.path.expanduser(f"~/bin/{name}"),
+        os.path.expanduser(f"~/.local/bin/{name}"),
+        f"/usr/local/bin/{name}",
+        f"/usr/bin/{name}",
+    ):
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+    return name
 
 
 class DownloaderError(Exception):
@@ -64,9 +81,10 @@ def _is_h264_aac_mp4(file_path: str) -> bool:
     if not file_path.lower().endswith(".mp4"):
         return False
 
+    ffprobe_bin = _find_binary("ffprobe")
     try:
         cmd_v = [
-            "ffprobe",
+            ffprobe_bin,
             "-v",
             "error",
             "-select_streams",
@@ -83,7 +101,7 @@ def _is_h264_aac_mp4(file_path: str) -> bool:
             return False
 
         cmd_a = [
-            "ffprobe",
+            ffprobe_bin,
             "-v",
             "error",
             "-select_streams",
@@ -107,8 +125,9 @@ def _is_h264_aac_mp4(file_path: str) -> bool:
 
 def _reencode_video(input_path: str, output_path: str) -> None:
     """Re-encode video with ffmpeg to libx264/aac with faststart for inline playback."""
+    ffmpeg_bin = _find_binary("ffmpeg")
     cmd = [
-        "ffmpeg",
+        ffmpeg_bin,
         "-y",
         "-i",
         input_path,
@@ -135,13 +154,11 @@ def _classify_yt_dlp_error(err_str: str) -> DownloaderError:
     if any(
         kw in lowered
         for kw in (
-            "private video",
-            "login required",
-            "sign in",
-            "account is private",
             "this video is private",
+            "account is private",
             "members-only",
-            "restricted",
+            "video unavailable",
+            "private video",
         )
     ):
         return PrivateOrLoginRequiredError(err_str)
@@ -163,7 +180,7 @@ def _sync_download_video(
     outtmpl = os.path.join(output_dir, "%(id)s.%(ext)s")
 
     ydl_opts: Dict[str, Any] = {
-        "format": "bv*[vcodec^=avc1][height<=1080]+ba[ext=m4a]/b[ext=mp4]/best",
+        "format": "bv*[vcodec^=avc1][height<=1080]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/best",
         "outtmpl": outtmpl,
         "merge_output_format": "mp4",
         "noplaylist": True,
@@ -171,7 +188,20 @@ def _sync_download_video(
         "no_warnings": True,
         "max_filesize": max_file_bytes,
         "socket_timeout": timeout_sec,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "ios", "mweb"]
+            }
+        },
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
     }
+
+    ffmpeg_bin = _find_binary("ffmpeg")
+    if os.path.dirname(ffmpeg_bin):
+        ydl_opts["ffmpeg_location"] = os.path.dirname(ffmpeg_bin)
 
     if cookies_file and os.path.isfile(cookies_file):
         ydl_opts["cookiefile"] = cookies_file
