@@ -30,6 +30,14 @@ router = Router(name="link")
 
 async def _send_video_with_retry(message: Message, **kwargs: Any) -> Message:
     """Send video with retry backoff on Telegram flood limits."""
+    for k in ("duration", "width", "height"):
+        val = kwargs.get(k)
+        if val is not None:
+            try:
+                kwargs[k] = int(round(float(val)))
+            except (ValueError, TypeError):
+                kwargs[k] = None
+
     for attempt in range(3):
         try:
             return await message.answer_video(**kwargs)

@@ -179,14 +179,21 @@ def _sync_download_video(
     max_file_bytes = max_file_mb * 1024 * 1024
     outtmpl = os.path.join(output_dir, "%(id)s.%(ext)s")
 
+    # For YouTube android client, format 18 is the primary combined format
+    is_youtube = any(d in url.lower() for d in ("youtube.com", "youtu.be"))
+    format_spec = (
+        "18/b[height<=1080]/bv*[height<=1080]+ba/b/best"
+        if is_youtube
+        else "bv*[vcodec^=avc1][height<=1080]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b/best"
+    )
+
     ydl_opts: Dict[str, Any] = {
-        "format": "bv*[vcodec^=avc1][height<=1080]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b/best",
+        "format": format_spec,
         "outtmpl": outtmpl,
         "merge_output_format": "mp4",
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
-        "max_filesize": max_file_bytes,
         "socket_timeout": timeout_sec,
         "extractor_args": {
             "youtube": {
@@ -260,20 +267,27 @@ def _sync_download_video(
                 reencoded_path = os.path.join(output_dir, "reencoded.mp4")
                 try:
                     _reencode_video(downloaded_file, reencoded_path)
-                    if os.path.isfile(reencoded_path):
+                    if os.path.isfile(reencoded_path) and os.path.getsize(reencoded_path) > 0:
                         final_file = reencoded_path
                 except Exception as e:
                     logger.warning("Re-encoding failed, using original file: %s", e)
+
+            if not os.path.isfile(final_file):
+                raise DownloadFailedError("Final video file could not be located on disk")
 
             # Re-check size of final file
             if os.path.getsize(final_file) > max_file_bytes:
                 raise VideoTooLargeError("Re-encoded video exceeds size limit")
 
+            w = download_info.get("width")
+            h = download_info.get("height")
+            d = download_info.get("duration")
+
             return VideoResult(
                 file_path=final_file,
-                width=download_info.get("width"),
-                height=download_info.get("height"),
-                duration=download_info.get("duration"),
+                width=int(w) if w is not None else None,
+                height=int(h) if h is not None else None,
+                duration=int(round(float(d))) if d is not None else None,
                 platform=download_info.get("extractor_key"),
                 title=download_info.get("title"),
             )
