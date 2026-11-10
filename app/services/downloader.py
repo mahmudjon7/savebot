@@ -77,56 +77,32 @@ class VideoResult:
 
 
 def _is_h264_aac_mp4(file_path: str) -> bool:
-    """Inspect file streams using ffprobe to check if it's H.264 + AAC in MP4 container."""
-    if not file_path.lower().endswith(".mp4"):
-        return False
-
-    ffprobe_bin = _find_binary("ffprobe")
-    try:
-        cmd_v = [
-            ffprobe_bin,
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=codec_name",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            file_path,
-        ]
-        res_v = subprocess.run(cmd_v, capture_output=True, text=True, check=True)
-        vcodec = res_v.stdout.strip().lower()
-        if not ("h264" in vcodec or "avc" in vcodec):
-            return False
-
-        cmd_a = [
-            ffprobe_bin,
-            "-v",
-            "error",
-            "-select_streams",
-            "a:0",
-            "-show_entries",
-            "stream=codec_name",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            file_path,
-        ]
-        res_a = subprocess.run(cmd_a, capture_output=True, text=True, check=True)
-        acodec = res_a.stdout.strip().lower()
-        if acodec and not ("aac" in acodec or "mp4a" in acodec):
-            return False
-
-        return True
-    except Exception as e:
-        logger.debug("ffprobe inspection error: %s", e)
-        return False
+    """Check if file is already a fast MP4."""
+    return file_path.lower().endswith(".mp4")
 
 
-def _reencode_video(input_path: str, output_path: str) -> None:
-    """Re-encode video with ffmpeg to libx264/aac with faststart for inline playback."""
+def _reencode_video(input_path: str, output_path: str) -> str:
+    """Fast remux with +faststart for instant inline Telegram playback without heavy CPU re-encoding."""
     ffmpeg_bin = _find_binary("ffmpeg")
-    cmd = [
+    cmd_copy = [
+        ffmpeg_bin,
+        "-y",
+        "-i",
+        input_path,
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        output_path,
+    ]
+    try:
+        res = subprocess.run(cmd_copy, capture_output=True)
+        if res.returncode == 0 and os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+            return output_path
+    except Exception as e:
+        logger.debug("Fast stream copy failed: %s", e)
+
+    cmd_encode = [
         ffmpeg_bin,
         "-y",
         "-i",
@@ -134,9 +110,9 @@ def _reencode_video(input_path: str, output_path: str) -> None:
         "-c:v",
         "libx264",
         "-preset",
-        "fast",
+        "ultrafast",
         "-crf",
-        "23",
+        "25",
         "-c:a",
         "aac",
         "-b:a",
@@ -145,7 +121,14 @@ def _reencode_video(input_path: str, output_path: str) -> None:
         "+faststart",
         output_path,
     ]
-    subprocess.run(cmd, capture_output=True, check=True)
+    try:
+        res = subprocess.run(cmd_encode, capture_output=True)
+        if res.returncode == 0 and os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+            return output_path
+    except Exception as e:
+        logger.warning("Ultrafast encode failed: %s", e)
+
+    return input_path
 
 
 def _classify_yt_dlp_error(err_str: str) -> DownloaderError:
@@ -189,6 +172,8 @@ def _sync_download_video(
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": timeout_sec,
+        "concurrent_fragment_downloads": 5,
+        "buffersize": 1024 * 1024,
         "js_runtimes": {"node": {}, "deno": {}},
         "http_headers": {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
@@ -223,16 +208,7 @@ def _sync_download_video(
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # First extract info without downloading to validate duration
-            info = ydl.extract_info(url, download=False)
-            if not info:
-                raise DownloadFailedError("No video information found")
-
-            duration = info.get("duration")
-            if duration and duration > max_duration_sec:
-                raise VideoTooLongError(f"Video duration ({duration}s) exceeds {max_duration_sec}s")
-
-            # Perform the actual download
+            # Single-pass download for maximum speed
             download_info = ydl.extract_info(url, download=True)
             if not download_info:
                 raise DownloadFailedError("Download failed")
@@ -241,6 +217,10 @@ def _sync_download_video(
                 entries = [e for e in download_info["entries"] if e]
                 if entries:
                     download_info = entries[0]
+
+            duration = download_info.get("duration")
+            if duration and duration > max_duration_sec:
+                raise VideoTooLongError(f"Video duration ({duration}s) exceeds {max_duration_sec}s")
 
             downloaded_file = ydl.prepare_filename(download_info)
 
@@ -269,16 +249,11 @@ def _sync_download_video(
             if file_size > max_file_bytes:
                 raise VideoTooLargeError(f"File size ({file_size} bytes) exceeds limit")
 
-            # Check if re-encoding is needed
+            # Fast remux / stream copy for inline Telegram playback if needed
             final_file = downloaded_file
             if not _is_h264_aac_mp4(downloaded_file):
                 reencoded_path = os.path.join(output_dir, "reencoded.mp4")
-                try:
-                    _reencode_video(downloaded_file, reencoded_path)
-                    if os.path.isfile(reencoded_path) and os.path.getsize(reencoded_path) > 0:
-                        final_file = reencoded_path
-                except Exception as e:
-                    logger.warning("Re-encoding failed, using original file: %s", e)
+                final_file = _reencode_video(downloaded_file, reencoded_path)
 
             if not os.path.isfile(final_file):
                 raise DownloadFailedError("Final video file could not be located on disk")
