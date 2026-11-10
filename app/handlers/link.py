@@ -22,7 +22,7 @@ from app.services.downloader import (
 )
 from app.services.limiter import UserBusyError, limiter
 from app.services.subscription import check_user_subscriptions, get_subscription_keyboard
-from app.services.urls import extract_first_url, normalize_url, validate_url
+from app.services.urls import extract_first_url, normalize_url, resolve_redirects, validate_url
 
 logger = logging.getLogger(__name__)
 router = Router(name="link")
@@ -76,6 +76,13 @@ async def handle_link_message(message: Message) -> None:
         await message.reply(texts.ERR_NOT_ALLOWED)
         await record_download(settings.db_path, user_id, raw_url, "failed", reason)
         return
+
+    # Follow mobile redirects if needed (e.g. facebook.com/share/v/..., fb.watch/...)
+    resolved_url = await resolve_redirects(raw_url)
+    if resolved_url != raw_url:
+        is_valid_res, _ = validate_url(resolved_url, settings.allowed_domains)
+        if is_valid_res:
+            raw_url = resolved_url
 
     # Normalize URL to canonical form
     url_key = normalize_url(raw_url)

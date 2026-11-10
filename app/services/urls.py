@@ -1,9 +1,13 @@
 """URL extraction, validation, and normalization service."""
 
 import ipaddress
+import logging
 import re
 from typing import List, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+import aiohttp
+
+logger = logging.getLogger(__name__)
 
 URL_REGEX = re.compile(r"https?://[^\s<>\"'`]+", re.IGNORECASE)
 
@@ -22,6 +26,9 @@ TRACKING_PARAMS = {
     "sender_device",
     "context",
     "m",
+    "mibextid",
+    "rdid",
+    "share_url",
 }
 
 
@@ -139,3 +146,46 @@ def normalize_url(url: str) -> str:
     query_str = urlencode(query_items)
 
     return urlunparse((scheme, netloc, path, "", query_str, ""))
+
+
+async def resolve_redirects(url: str, timeout_sec: int = 8) -> str:
+    """Follow HTTP redirects for shortlinks and mobile share links (e.g. facebook.com/share)."""
+    # Only resolve if URL looks like a redirect / share pattern
+    url_lower = url.lower()
+    needs_resolve = any(
+        kw in url_lower
+        for kw in (
+            "/share/",
+            "fb.watch",
+            "vm.tiktok.com",
+            "vt.tiktok.com",
+            "youtu.be",
+            "pin.it",
+        )
+    )
+    if not needs_resolve:
+        return url
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/128.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    try:
+        timeout = aiohttp.ClientTimeout(total=float(timeout_sec))
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            try:
+                async with session.head(url, allow_redirects=True) as resp:
+                    if resp.status < 400 and str(resp.url) != url:
+                        return str(resp.url)
+            except Exception:
+                pass
+            async with session.get(url, allow_redirects=True) as resp:
+                if resp.status < 400:
+                    return str(resp.url)
+    except Exception as e:
+        logger.debug("Failed to resolve redirect for %s: %s", url, e)
+    return url

@@ -180,7 +180,7 @@ def _sync_download_video(
     outtmpl = os.path.join(output_dir, "%(id)s.%(ext)s")
 
     ydl_opts: Dict[str, Any] = {
-        "format": "bv*[vcodec^=avc1][height<=1080]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/best",
+        "format": "bv*[vcodec^=avc1][height<=1080]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b/best",
         "outtmpl": outtmpl,
         "merge_output_format": "mp4",
         "noplaylist": True,
@@ -190,7 +190,7 @@ def _sync_download_video(
         "socket_timeout": timeout_sec,
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "ios", "mweb"]
+                "player_client": ["android"]
             }
         },
         "http_headers": {
@@ -222,6 +222,11 @@ def _sync_download_video(
             if not download_info:
                 raise DownloadFailedError("Download failed")
 
+            if "entries" in download_info:
+                entries = [e for e in download_info["entries"] if e]
+                if entries:
+                    download_info = entries[0]
+
             downloaded_file = ydl.prepare_filename(download_info)
 
             # Check if merged mp4 exists
@@ -232,13 +237,15 @@ def _sync_download_video(
 
             if not os.path.isfile(downloaded_file):
                 # Search directory for whatever was saved
-                files = [
-                    os.path.join(output_dir, f)
-                    for f in os.listdir(output_dir)
-                    if os.path.isfile(os.path.join(output_dir, f))
-                ]
-                if files:
-                    downloaded_file = files[0]
+                candidates = []
+                for root, _, files in os.walk(output_dir):
+                    for f in files:
+                        p = os.path.join(root, f)
+                        if os.path.isfile(p) and not f.endswith((".part", ".ytdl")):
+                            candidates.append(p)
+                if candidates:
+                    candidates.sort(key=lambda x: os.path.getsize(x), reverse=True)
+                    downloaded_file = candidates[0]
                 else:
                     raise DownloadFailedError("Downloaded file could not be located on disk")
 
