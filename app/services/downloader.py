@@ -195,11 +195,6 @@ def _sync_download_video(
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": timeout_sec,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android"]
-            }
-        },
         "http_headers": {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",
@@ -210,8 +205,14 @@ def _sync_download_video(
     if os.path.dirname(ffmpeg_bin):
         ydl_opts["ffmpeg_location"] = os.path.dirname(ffmpeg_bin)
 
-    if cookies_file and os.path.isfile(cookies_file):
+    if cookies_file and os.path.isfile(cookies_file) and os.path.getsize(cookies_file) > 0:
         ydl_opts["cookiefile"] = cookies_file
+    else:
+        ydl_opts["extractor_args"] = {
+            "youtube": {
+                "player_client": ["android"]
+            }
+        }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
