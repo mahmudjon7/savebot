@@ -5,6 +5,8 @@ import logging
 import sys
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -29,9 +31,19 @@ async def main() -> None:
     logger.info("Initializing database at: %s", settings.db_path)
     await init_db(settings.db_path)
 
+    # Optional proxy or custom Telegram Bot API server
+    session = AiohttpSession(proxy=settings.proxy) if settings.proxy else None
+    server = (
+        TelegramAPIServer.from_base(settings.custom_bot_api_url)
+        if settings.custom_bot_api_url
+        else TelegramAPIServer.from_base("https://api.telegram.org")
+    )
+
     # Bot & Dispatcher setup with in-memory FSM storage
     bot = Bot(
         token=settings.bot_token,
+        session=session,
+        server=server,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher(storage=MemoryStorage())

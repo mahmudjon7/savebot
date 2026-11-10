@@ -1,0 +1,7 @@
+aiogram>=3.13
+yt-dlp
+aiosqlite
+pydantic-settings
+aiohttp-socks
+pytest
+pytest-asyncio

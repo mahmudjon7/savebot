@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     cookies_file: Optional[str] = None
     db_path: str = "data/bot.db"
     log_level: str = "INFO"
+    proxy: Optional[str] = None
+    custom_bot_api_url: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=".env",
