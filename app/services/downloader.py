@@ -205,8 +205,20 @@ def _sync_download_video(
     if os.path.dirname(ffmpeg_bin):
         ydl_opts["ffmpeg_location"] = os.path.dirname(ffmpeg_bin)
 
+    if not cookies_file or not os.path.isfile(cookies_file):
+        for cand in (
+            "cookies/cookies.txt",
+            os.path.join(os.getcwd(), "cookies", "cookies.txt"),
+            os.path.expanduser("~/savebot/cookies/cookies.txt"),
+        ):
+            if os.path.isfile(cand) and os.path.getsize(cand) > 0:
+                cookies_file = cand
+                break
+
     if cookies_file and os.path.isfile(cookies_file) and os.path.getsize(cookies_file) > 0:
         ydl_opts["cookiefile"] = cookies_file
+        ydl_opts["remote_components"] = ["ejs:github"]
+        ydl_opts["js_runtimes"] = {"node": {}, "deno": {}}
     else:
         ydl_opts["extractor_args"] = {
             "youtube": {

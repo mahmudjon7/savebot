@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     max_concurrent_downloads: int = 3
     download_timeout_sec: int = 120
     allowed_domains_raw: str = Field(default="", validation_alias="allowed_domains")
-    cookies_file: Optional[str] = None
+    cookies_file: Optional[str] = "cookies/cookies.txt"
     db_path: str = "data/bot.db"
     log_level: str = "INFO"
     proxy: Optional[str] = None
