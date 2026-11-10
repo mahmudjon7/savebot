@@ -179,13 +179,7 @@ def _sync_download_video(
     max_file_bytes = max_file_mb * 1024 * 1024
     outtmpl = os.path.join(output_dir, "%(id)s.%(ext)s")
 
-    # For YouTube android client, format 18 is the primary combined format
-    is_youtube = any(d in url.lower() for d in ("youtube.com", "youtu.be"))
-    format_spec = (
-        "18/b[height<=1080]/bv*[height<=1080]+ba/b/best"
-        if is_youtube
-        else "bv*[vcodec^=avc1][height<=1080]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b/best"
-    )
+    format_spec = "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b/best"
 
     ydl_opts: Dict[str, Any] = {
         "format": format_spec,
@@ -195,6 +189,7 @@ def _sync_download_video(
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": timeout_sec,
+        "js_runtimes": {"node": {}, "deno": {}},
         "http_headers": {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",

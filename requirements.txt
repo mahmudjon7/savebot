@@ -1,5 +1,6 @@
 aiogram>=3.13
 yt-dlp
+yt-dlp-ejs
 aiosqlite
 pydantic-settings
 aiohttp-socks
