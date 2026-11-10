@@ -1,7 +1,7 @@
 """Application settings loaded from environment variables."""
 
 from typing import List, Optional
-from pydantic import field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_ALLOWED_DOMAINS: List[str] = [
@@ -22,12 +22,12 @@ class Settings(BaseSettings):
     """Configuration settings for ClipGrab Bot."""
 
     bot_token: str = ""
-    admin_ids: List[int] = []
+    admin_ids_raw: str = Field(default="", validation_alias="admin_ids")
     max_file_mb: int = 50
     max_duration_sec: int = 600
     max_concurrent_downloads: int = 3
     download_timeout_sec: int = 120
-    allowed_domains: List[str] = DEFAULT_ALLOWED_DOMAINS
+    allowed_domains_raw: str = Field(default="", validation_alias="allowed_domains")
     cookies_file: Optional[str] = None
     db_path: str = "data/bot.db"
     log_level: str = "INFO"
@@ -39,31 +39,25 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    @field_validator("admin_ids", mode="before")
-    @classmethod
-    def parse_admin_ids(cls, v: object) -> List[int]:
-        """Parse comma-separated admin IDs into list of ints."""
-        if isinstance(v, str):
-            v = v.strip()
-            if not v:
-                return []
-            return [int(x.strip()) for x in v.split(",") if x.strip()]
-        if isinstance(v, list):
-            return [int(x) for x in v]
-        return []
+    @property
+    def admin_ids(self) -> List[int]:
+        """Parse comma-separated admin IDs from admin_ids_raw."""
+        if not self.admin_ids_raw:
+            return []
+        res: List[int] = []
+        for x in str(self.admin_ids_raw).split(","):
+            val = x.strip()
+            if val.isdigit() or (val.startswith("-") and val[1:].isdigit()):
+                res.append(int(val))
+        return res
 
-    @field_validator("allowed_domains", mode="before")
-    @classmethod
-    def parse_allowed_domains(cls, v: object) -> List[str]:
-        """Parse comma-separated allowed domains."""
-        if isinstance(v, str):
-            v = v.strip()
-            if not v:
-                return DEFAULT_ALLOWED_DOMAINS
-            return [x.strip().lower() for x in v.split(",") if x.strip()]
-        if isinstance(v, list):
-            return [str(x).strip().lower() for x in v]
-        return DEFAULT_ALLOWED_DOMAINS
+    @property
+    def allowed_domains(self) -> List[str]:
+        """Parse comma-separated allowed domains from allowed_domains_raw."""
+        if not self.allowed_domains_raw:
+            return DEFAULT_ALLOWED_DOMAINS
+        res = [x.strip().lower() for x in str(self.allowed_domains_raw).split(",") if x.strip()]
+        return res if res else DEFAULT_ALLOWED_DOMAINS
 
 
 settings = Settings()

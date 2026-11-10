@@ -2,8 +2,7 @@
 
 START_WELCOME = (
     "👋 <b>Salom! Men ClipGrab botiman.</b>\n\n"
-    "Menga video havolasini yuboring va men uni bir necha soniyada yuklab beraman.\n\n"
-    "Misol uchun YouTube Shorts, TikTok yoki Instagram Reels linkini yuborib ko'ring: 👇"
+    "📥 <b>Video linkini yuboring:</b>"
 )
 
 HELP_MESSAGE = (
@@ -18,7 +17,7 @@ HELP_MESSAGE = (
     "<b>Cheklovlar:</b>\n"
     "• Maksimal hajm: 50 MB\n"
     "• Maksimal davomiylik: 10 daqiqa\n\n"
-    "<i>Faqat havolani yuboring, qolganini o'zim bajaramiz!</i>"
+    "<i>Video linkini yuboring, qolganini o'zim bajaramiz!</i>"
 )
 
 STATUS_DOWNLOADING = "⏳ Yuklanmoqda..."
@@ -33,7 +32,7 @@ ERR_GENERAL = "Yuklab bo'lmadi. Link ochiq ekanini tekshiring."
 
 # Mandatory subscription texts
 SUB_REQUIRED = "⚠️ <b>Botdan foydalanish uchun quyidagi homiy kanal(lar)ga obuna bo'ling:</b>"
-SUB_CHECK_SUCCESS = "✅ <b>Obuna tasdiqlandi!</b>\nEndi bemalol video havolasini yuborishingiz mumkin."
+SUB_CHECK_SUCCESS = "✅ <b>Obuna tasdiqlandi!</b>\n\n📥 <b>Video linkini yuboring:</b>"
 SUB_CHECK_FAIL = "❌ Siz hali barcha kanallarga obuna bo'lmadingiz! Iltimos, a'zo bo'lib, qayta tekshiring."
 
 # Admin Panel texts
