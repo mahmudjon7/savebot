@@ -1,0 +1,31 @@
+# Environment variables
+.env
+
+# Database and runtime data
+data/
+*.db
+*.sqlite3
+
+# Cookies
+cookies/
+*.txt
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

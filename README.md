@@ -52,7 +52,6 @@ Built with **Python 3.12**, **aiogram 3**, **yt-dlp** and **ffmpeg**. Runs in Do
 | 🔗 Link to video | Detects a URL in any message and downloads the video. |
 | ▶️ Inline playback | Sends with correct `width`, `height`, `duration`, `supports_streaming` so it plays directly in chat. |
 | ⚡ Smart cache | Stores Telegram `file_id` per normalized URL in SQLite. Repeat links are instant. |
-| 🎵 MP3 button | Inline button under the video to extract audio. |
 | 🚦 Rate limiting | One active download per user and a global concurrency cap. |
 | 🛡 Domain allowlist | Only configured platforms are accepted. |
 | 🍪 Cookies support | Optional `cookies.txt` for Instagram and age-restricted content. |
@@ -68,7 +67,7 @@ Built with **Python 3.12**, **aiogram 3**, **yt-dlp** and **ffmpeg**. Runs in Do
 | Language | Python 3.12 | Modern asyncio, typing. |
 | Bot framework | aiogram 3.x | Fully async, clean routers and filters. |
 | Downloader | yt-dlp | Supports hundreds of sites, actively maintained. |
-| Media | ffmpeg | Merging streams, audio extraction, re-encoding when needed. |
+| Media | ffmpeg | Merging streams, re-encoding when needed. |
 | Storage | SQLite via `aiosqlite` | Zero-ops, enough for cache and stats. |
 | Config | `pydantic-settings` | Typed settings from `.env`. |
 | Logging | stdlib `logging`, structured format | Easy to read in `docker logs`. |
@@ -95,7 +94,7 @@ Built with **Python 3.12**, **aiogram 3**, **yt-dlp** and **ffmpeg**. Runs in Do
       ┌──────────────────────────────┐
       │ Downloader service            │
       │ yt-dlp in a worker thread     │
-      │ temp dir → ffmpeg → mp4/mp3   │
+      │ temp dir → ffmpeg → mp4   │
       └──────────────────────────────┘
 ```
 
@@ -125,7 +124,6 @@ clipgrab-bot/
 │   │   ├── __init__.py
 │   │   ├── start.py           # /start, /help
 │   │   ├── link.py            # URL messages → video
-│   │   ├── callbacks.py       # inline buttons (MP3)
 │   │   └── admin.py           # /stats, /update_ytdlp
 │   ├── services/
 │   │   ├── __init__.py
@@ -226,6 +224,14 @@ CREATE TABLE IF NOT EXISTS users (
     username    TEXT,
     first_seen  TEXT NOT NULL DEFAULT (datetime('now')),
     last_seen   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS channels (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id  TEXT NOT NULL UNIQUE,   -- @channel or -100xxx
+    title       TEXT NOT NULL,
+    url         TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS media_cache (
@@ -423,7 +429,6 @@ You are implementing this project end to end. Follow these rules:
    4. link handler (video send)
    5. cache
    6. limiter
-   7. MP3 callback
    8. admin commands
    9. Docker run end to end
 

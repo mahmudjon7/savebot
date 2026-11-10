@@ -1,0 +1,14 @@
+services:
+  bot:
+    build: .
+    container_name: clipgrab-bot
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./cookies:/app/cookies:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
