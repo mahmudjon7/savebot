@@ -55,7 +55,10 @@ async def main() -> None:
 
     logger.info("Bot configured successfully. Starting polling...")
     try:
-        await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
+        await dp.start_polling(
+            bot,
+            allowed_updates=["message", "callback_query", "chat_join_request", "chat_member"],
+        )
     finally:
         await bot.session.close()
 

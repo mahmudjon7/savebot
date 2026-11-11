@@ -1,10 +1,11 @@
 """Admin panel handlers with broadcast and sponsor channel management."""
 
 import asyncio
+import html
 import logging
 import subprocess
 import sys
-from typing import List
+from typing import List, Optional, Tuple, Union
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command
@@ -15,6 +16,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    MessageOriginChannel,
 )
 import yt_dlp
 
@@ -26,8 +28,10 @@ from app.db import (
     get_channels,
     get_stats_24h,
     remove_channel,
+    remove_channel_by_id,
     remove_user,
 )
+from app.services.subscription import normalize_channel_url, parse_channel_identifier
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin")
@@ -192,9 +196,16 @@ async def render_channels_menu(message: Message, is_edit: bool = True) -> None:
         text = texts.CHANNELS_TITLE
         for ch in channels:
             ch_title = ch["title"] or ch["channel_id"]
+            del_key = ch["id"] if ch.get("id") is not None else ch["channel_id"]
+            valid_url = normalize_channel_url(ch.get("url"), ch.get("channel_id"))
+            first_btn = (
+                InlineKeyboardButton(text=f"📢 {ch_title}", url=valid_url)
+                if valid_url
+                else InlineKeyboardButton(text=f"⚠️ {ch_title}", callback_data="ch:bad_url")
+            )
             keyboard_rows.append([
-                InlineKeyboardButton(text=f"📢 {ch_title}", url=ch["url"]),
-                InlineKeyboardButton(text="❌ O'chirish", callback_data=f"ch:del:{ch['channel_id']}"),
+                first_btn,
+                InlineKeyboardButton(text="❌ O'chirish", callback_data=f"ch:del:{del_key}"),
             ])
 
     keyboard_rows.append([InlineKeyboardButton(text=texts.ADMIN_BTN_ADD_CHANNEL, callback_data="ch:add")])
@@ -208,26 +219,45 @@ async def render_channels_menu(message: Message, is_edit: bool = True) -> None:
 
 
 @router.callback_query(F.data == "admin:channels")
-async def callback_channels_list(callback: CallbackQuery) -> None:
-    """Show sponsor channels list."""
+async def callback_channels_list(callback: CallbackQuery, state: FSMContext) -> None:
+    """Show sponsor channels list and clear any pending channel-add state."""
     if not callback.from_user or not is_admin(callback.from_user.id):
         await callback.answer(texts.ADMIN_ONLY, show_alert=True)
         return
+    await state.clear()
     if callback.message:
         await render_channels_menu(callback.message, is_edit=True)
     await callback.answer()
 
 
+@router.callback_query(F.data == "ch:bad_url")
+async def callback_channel_bad_url(callback: CallbackQuery) -> None:
+    """Inform admin about a malformed stored sponsor URL."""
+    if not callback.from_user or not is_admin(callback.from_user.id):
+        await callback.answer(texts.ADMIN_ONLY, show_alert=True)
+        return
+    await callback.answer(texts.CHANNEL_INVALID_URL_ALERT, show_alert=True)
+
+
 @router.callback_query(F.data.startswith("ch:del:"))
 async def callback_channel_delete(callback: CallbackQuery) -> None:
-    """Delete a sponsor channel."""
+    """Delete a sponsor channel by DB row ID or channel_id."""
     if not callback.from_user or not is_admin(callback.from_user.id):
         await callback.answer(texts.ADMIN_ONLY, show_alert=True)
         return
 
-    channel_id = callback.data.split("ch:del:")[1]
-    await remove_channel(settings.db_path, channel_id)
-    await callback.answer(texts.CHANNEL_DELETED_SUCCESS.format(channel_id=channel_id), show_alert=True)
+    target = callback.data.split("ch:del:", 1)[1]
+    if target.isdigit():
+        removed_cid = await remove_channel_by_id(settings.db_path, int(target))
+        display_id = removed_cid or target
+    else:
+        await remove_channel(settings.db_path, target)
+        display_id = target
+
+    await callback.answer(
+        texts.CHANNEL_DELETED_SUCCESS.format(channel_id=display_id).replace("<code>", "").replace("</code>", ""),
+        show_alert=True,
+    )
     if callback.message:
         await render_channels_menu(callback.message, is_edit=True)
 
@@ -248,55 +278,147 @@ async def callback_channel_add_start(callback: CallbackQuery, state: FSMContext)
     await callback.answer()
 
 
-@router.message(AdminStates.waiting_for_channel)
-async def process_channel_add(message: Message, state: FSMContext) -> None:
-    """Process channel addition from admin input."""
-    if not message.from_user or not is_admin(message.from_user.id) or not message.text:
-        return
+def _extract_channel_input(
+    message: Message,
+) -> Tuple[Optional[Union[int, str]], Optional[str], Optional[str], Optional[str]]:
+    """
+    Parse channel input from a forwarded channel post or pipe-separated/single text.
+    Returns (lookup_id, custom_title, custom_url, error_reply_html).
+    """
+    origin = getattr(message, "forward_origin", None)
+    fwd_chat = origin.chat if isinstance(origin, MessageOriginChannel) else getattr(message, "forward_from_chat", None)
+    if fwd_chat is not None:
+        return fwd_chat.id, None, None, None
+    if origin is not None:
+        return None, None, None, texts.CHANNEL_ADD_NOT_CHANNEL
+
+    if not message.text:
+        return None, None, None, texts.CHANNEL_ADD_FAILED
 
     text = message.text.strip()
-    channel_id = ""
-    title = ""
-    url = ""
-
-    # Check if format with '|' was used
+    custom_title: Optional[str] = None
+    custom_url: Optional[str] = None
     if "|" in text:
         parts = [p.strip() for p in text.split("|")]
-        if len(parts) >= 3:
-            channel_id, title, url = parts[0], parts[1], parts[2]
-        elif len(parts) == 2:
-            channel_id, title = parts[0], parts[1]
-            url = f"https://t.me/{channel_id.lstrip('@')}"
+        raw_id = parts[0]
+        custom_title = parts[1] if len(parts) >= 2 and parts[1] else None
+        custom_url = parts[2] if len(parts) >= 3 and parts[2] else None
     else:
-        # User provided single identifier like @mychannel
-        channel_id = text
-        try:
-            chat = await message.bot.get_chat(channel_id)
-            title = chat.title or channel_id
-            if chat.username:
-                url = f"https://t.me/{chat.username}"
-            else:
-                url = await chat.export_invite_link()
-        except Exception as e:
-            logger.warning("Could not auto-fetch channel info for %s: %s", channel_id, e)
-            title = channel_id
-            url = f"https://t.me/{channel_id.lstrip('@')}"
+        raw_id = text
 
-    if not channel_id:
-        await message.reply(texts.CHANNEL_ADD_FAILED)
+    lookup_id, invite_only = parse_channel_identifier(raw_id)
+    if invite_only:
+        return (
+            None,
+            None,
+            None,
+            texts.CHANNEL_ADD_INVITE_LINK_ONLY.format(invite_url=html.escape(invite_only)),
+        )
+    if lookup_id is None:
+        return None, None, None, texts.CHANNEL_ADD_FAILED
+
+    if custom_url:
+        normalized_custom = normalize_channel_url(custom_url)
+        if not normalized_custom:
+            return None, None, None, texts.CHANNEL_ADD_INVALID_URL
+        custom_url = normalized_custom
+
+    return lookup_id, custom_title, custom_url, None
+
+
+async def _cleanup_legacy_channel_aliases(
+    db_path: str,
+    canonical_id: str,
+    username: Optional[str],
+) -> None:
+    """Remove duplicate legacy channel entries (e.g., @username or URL) for the same chat."""
+    if not username:
+        return
+    target_uname = f"@{username.lower()}"
+    for row in await get_channels(db_path):
+        existing_cid = str(row["channel_id"])
+        if existing_cid == canonical_id:
+            continue
+        parsed, _ = parse_channel_identifier(existing_cid)
+        if isinstance(parsed, str) and parsed.lower() == target_uname:
+            await remove_channel(db_path, existing_cid)
+
+
+@router.message(AdminStates.waiting_for_channel)
+async def process_channel_add(message: Message, state: FSMContext) -> None:
+    """Process channel addition from admin input and verify bot admin access."""
+    if not message.from_user or not is_admin(message.from_user.id):
         return
 
-    success = await add_channel(settings.db_path, channel_id=channel_id, title=title, url=url)
+    lookup_id, custom_title, custom_url, parse_err = _extract_channel_input(message)
+    if parse_err or lookup_id is None:
+        await message.reply(parse_err or texts.CHANNEL_ADD_FAILED, parse_mode="HTML")
+        return
+
+    try:
+        chat = await message.bot.get_chat(lookup_id)
+    except Exception as e:
+        logger.warning("Could not fetch sponsor channel %s: %s", lookup_id, e)
+        await message.reply(texts.CHANNEL_ADD_FAILED, parse_mode="HTML")
+        return
+
+    if getattr(chat, "type", None) not in ("channel", "supergroup", "group"):
+        await message.reply(texts.CHANNEL_ADD_NOT_CHANNEL)
+        return
+
+    try:
+        bot_member = await message.bot.get_chat_member(chat_id=chat.id, user_id=message.bot.id)
+        bot_status = str(getattr(getattr(bot_member, "status", ""), "value", getattr(bot_member, "status", ""))).lower()
+    except Exception as e:
+        logger.warning("Bot cannot check membership in channel %s: %s", chat.id, e)
+        await message.reply(texts.CHANNEL_ADD_NOT_ADMIN, parse_mode="HTML")
+        return
+
+    if bot_status not in ("administrator", "creator"):
+        await message.reply(texts.CHANNEL_ADD_NOT_ADMIN, parse_mode="HTML")
+        return
+
+    title = custom_title or chat.title or (f"@{chat.username}" if chat.username else str(chat.id))
+    url: Optional[str] = custom_url
+    if not url:
+        if chat.username:
+            url = f"https://t.me/{chat.username}"
+        else:
+            url = normalize_channel_url(getattr(chat, "invite_link", None))
+            if not url:
+                try:
+                    exported = await message.bot.export_chat_invite_link(chat.id)
+                    url = normalize_channel_url(exported)
+                except Exception as e:
+                    logger.warning("Could not export invite link for private channel %s: %s", chat.id, e)
+
+    if not url:
+        await message.reply(
+            texts.CHANNEL_ADD_NO_INVITE_LINK.format(
+                channel_id=chat.id,
+                title=html.escape(title),
+            ),
+            parse_mode="HTML",
+        )
+        return
+
+    canonical_id = str(chat.id)
+    await _cleanup_legacy_channel_aliases(settings.db_path, canonical_id, getattr(chat, "username", None))
+    success = await add_channel(settings.db_path, channel_id=canonical_id, title=title, url=url)
     await state.clear()
 
     if success:
         await message.reply(
-            texts.CHANNEL_ADDED_SUCCESS.format(title=title, channel_id=channel_id, url=url),
+            texts.CHANNEL_ADDED_SUCCESS.format(
+                title=html.escape(title),
+                channel_id=html.escape(canonical_id),
+                url=html.escape(url),
+            ),
             reply_markup=get_admin_menu_keyboard(),
             parse_mode="HTML",
         )
     else:
-        await message.reply(texts.CHANNEL_ADD_FAILED, reply_markup=get_admin_menu_keyboard())
+        await message.reply(texts.CHANNEL_ADD_FAILED, reply_markup=get_admin_menu_keyboard(), parse_mode="HTML")
 
 
 # ---------------- UPDATE YT-DLP ----------------

@@ -78,12 +78,38 @@ CHANNELS_EMPTY = "📢 Hozirda hech qanday homiy kanal qo'shilmagan."
 CHANNELS_TITLE = "📢 <b>Faol homiy kanallar ro'yxati:</b>\n\n<i>Kanalni o'chirish uchun uning yonidagi ❌ tugmasini bosing:</i>"
 CHANNEL_ADD_PROMPT = (
     "➕ <b>Yangi homiy kanal qo'shish:</b>\n\n"
-    "Kanal ma'lumotlarini bitta xabarda quyidagi tartibda yuboring:\n"
-    "<code>@kanal_usernomi | Kanal Nomi | https://t.me/havola</code>\n\n"
-    "Yoki faqat kanal usernamesini yuboring (masalan: <code>@uzbekistan</code>)\n\n"
+    "Quyidagi usullardan birini yuboring:\n"
+    "• Kanal username yoki havolasi: <code>@uzbekistan</code> yoki <code>https://t.me/uzbekistan</code>\n"
+    "• Yopiq kanaldan biror postni shu yerga <b>forward</b> qiling\n"
+    "• Yoki qo'lda kiriting:\n"
+    "<code>-1001234567890 | Kanal Nomi | https://t.me/+havola</code>\n\n"
     "<i>⚠️ Muhim: Bot o'sha kanalda administrator qilingan bo'lishi shart!</i>\n"
     "<i>Bekor qilish: /cancel</i>"
 )
-CHANNEL_ADDED_SUCCESS = "✅ Kanal muvaffaqiyatli qo'shildi!\nNomi: <b>{title}</b>\nID/User: <code>{channel_id}</code>\nHavola: {url}"
-CHANNEL_ADD_FAILED = "❌ Kanalni qo'shib bo'lmadi.\nKanal mavjudligini va bot u yerda admin ekanligini tekshiring."
+CHANNEL_ADDED_SUCCESS = "✅ Kanal muvaffaqiyatli qo'shildi!\nNomi: <b>{title}</b>\nID: <code>{channel_id}</code>\nHavola: {url}"
+CHANNEL_ADD_FAILED = "❌ Kanalni qo'shib bo'lmadi.\nKanal mavjudligini va bot u yerda admin ekanligini tekshiring.\n\n<i>Qayta urinib ko'ring yoki /cancel bosing.</i>"
+CHANNEL_ADD_NOT_ADMIN = (
+    "❌ <b>Bot ushbu kanalda administrator emas!</b>\n\n"
+    "Majburiy obunani tekshirish uchun avval botni kanalga <b>Admin</b> qiling, so'ngra qayta yuboring.\n\n"
+    "<i>Bekor qilish: /cancel</i>"
+)
+CHANNEL_ADD_INVITE_LINK_ONLY = (
+    "❌ Taklif havolasi (<code>t.me/+...</code>) orqali kanal ID sini aniqlab bo'lmaydi.\n\n"
+    "Kanaldan biror postni shu yerga <b>forward</b> qiling yoki quyidagicha yuboring:\n"
+    "<code>-100kanal_id | Kanal Nomi | {invite_url}</code>\n\n"
+    "<i>Bekor qilish: /cancel</i>"
+)
+CHANNEL_ADD_NO_INVITE_LINK = (
+    "❌ Yopiq kanal uchun taklif havolasini olib bo'lmadi.\n\n"
+    "Botga <b>Foydalanuvchilarni havola orqali taklif qilish</b> huquqini bering yoki havolani qo'lda yuboring:\n"
+    "<code>{channel_id} | {title} | https://t.me/+havola</code>\n\n"
+    "<i>Bekor qilish: /cancel</i>"
+)
+CHANNEL_ADD_INVALID_URL = (
+    "❌ Kanal havolasi noto'g'ri.\n"
+    "Havola <code>https://t.me/...</code> ko'rinishida bo'lishi kerak.\n\n"
+    "<i>Qayta urinib ko'ring yoki /cancel bosing.</i>"
+)
+CHANNEL_ADD_NOT_CHANNEL = "❌ Bu kanal yoki guruh emas. Iltimos, kanal kiriting yoki kanaldan post forward qiling."
 CHANNEL_DELETED_SUCCESS = "✅ Homiy kanal o'chirildi: <code>{channel_id}</code>"
+CHANNEL_INVALID_URL_ALERT = "⚠️ Kanal havolasi noto'g'ri saqlangan. Uni o'chirib qayta qo'shing."

@@ -38,6 +38,13 @@ CREATE TABLE IF NOT EXISTS downloads (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS join_requests (
+    user_id     INTEGER NOT NULL,
+    channel_id  TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, channel_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_media_cache_url_key ON media_cache(url_key);
 CREATE INDEX IF NOT EXISTS idx_downloads_created_at ON downloads(created_at);
 """
@@ -110,6 +117,55 @@ async def remove_channel(db_path: str, channel_id: str) -> bool:
         cursor = await db.execute(sql, (str(channel_id),))
         await db.commit()
         return cursor.rowcount > 0
+
+
+async def remove_channel_by_id(db_path: str, row_id: int) -> Optional[str]:
+    """Remove a sponsor channel by its primary key ID and return its channel_id."""
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute("SELECT channel_id FROM channels WHERE id = ?;", (row_id,)) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return None
+        await db.execute("DELETE FROM channels WHERE id = ?;", (row_id,))
+        await db.commit()
+        return str(row[0])
+
+
+async def add_join_request(db_path: str, user_id: int, channel_ids: List[str]) -> None:
+    """Record a pending channel join request for a user."""
+    if not channel_ids:
+        return
+    sql = """
+    INSERT INTO join_requests (user_id, channel_id, created_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(user_id, channel_id) DO UPDATE SET
+        created_at = datetime('now');
+    """
+    async with aiosqlite.connect(db_path) as db:
+        await db.executemany(sql, [(user_id, cid) for cid in channel_ids])
+        await db.commit()
+
+
+async def has_join_request(db_path: str, user_id: int, channel_ids: List[str]) -> bool:
+    """Return True if the user has a recorded join request for any matching channel identifier."""
+    if not channel_ids:
+        return False
+    placeholders = ", ".join("?" for _ in channel_ids)
+    sql = f"SELECT 1 FROM join_requests WHERE user_id = ? AND channel_id IN ({placeholders}) LIMIT 1;"
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute(sql, (user_id, *channel_ids)) as cursor:
+            return (await cursor.fetchone()) is not None
+
+
+async def remove_join_request(db_path: str, user_id: int, channel_ids: List[str]) -> None:
+    """Delete recorded join request(s) for a user in a channel."""
+    if not channel_ids:
+        return
+    placeholders = ", ".join("?" for _ in channel_ids)
+    sql = f"DELETE FROM join_requests WHERE user_id = ? AND channel_id IN ({placeholders});"
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(sql, (user_id, *channel_ids))
+        await db.commit()
 
 
 async def get_channels(db_path: str) -> List[Dict[str, Any]]:
