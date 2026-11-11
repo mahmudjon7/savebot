@@ -12,6 +12,7 @@ from aiogram.exceptions import (
     TelegramForbiddenError,
     TelegramNetworkError,
     TelegramRetryAfter,
+    TelegramServerError,
 )
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -162,14 +163,18 @@ async def _get_chat_member_with_retry(
     user_id: int,
 ) -> Any:
     """Call bot.get_chat_member with brief backoff on flood control or transient network errors."""
-    try:
-        return await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-    except TelegramRetryAfter as e:
-        await asyncio.sleep(min(float(e.retry_after), 3.0))
-        return await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-    except (TelegramNetworkError, asyncio.TimeoutError):
-        await asyncio.sleep(0.3)
-        return await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+    delays = (0.3, 0.8)
+    for attempt in range(len(delays) + 1):
+        try:
+            return await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+        except TelegramRetryAfter as e:
+            if attempt >= len(delays):
+                raise
+            await asyncio.sleep(min(float(e.retry_after), 3.0))
+        except (TelegramNetworkError, TelegramServerError, asyncio.TimeoutError):
+            if attempt >= len(delays):
+                raise
+            await asyncio.sleep(delays[attempt])
 
 
 async def check_user_subscriptions(
@@ -211,6 +216,15 @@ async def check_user_subscriptions(
                     raw_cid,
                     e,
                 )
+            continue
+        except (TelegramNetworkError, TelegramServerError, asyncio.TimeoutError) as e:
+            logger.warning(
+                "Transient Telegram error verifying user %s in channel %s: %s",
+                user_id,
+                raw_cid,
+                e,
+            )
+            unsubscribed.append(ch)
             continue
         except Exception as e:
             logger.warning(

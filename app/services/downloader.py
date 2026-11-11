@@ -162,7 +162,13 @@ def _sync_download_video(
     max_file_bytes = max_file_mb * 1024 * 1024
     outtmpl = os.path.join(output_dir, "%(id)s.%(ext)s")
 
-    format_spec = "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b/best"
+    format_spec = (
+        f"bv*[ext=mp4][height<=1080][filesize<{max_file_mb}M]+ba[ext=m4a]"
+        f"/b[ext=mp4][height<=1080][filesize<{max_file_mb}M]"
+        f"/bv*[height<=720][filesize<{max_file_mb}M]+ba"
+        f"/b[height<=720][filesize<{max_file_mb}M]"
+        f"/bv*[height<=720]+ba/b[height<=720]/bv*+ba/b/best"
+    )
 
     ydl_opts: Dict[str, Any] = {
         "format": format_spec,
@@ -171,7 +177,9 @@ def _sync_download_video(
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
-        "socket_timeout": timeout_sec,
+        "socket_timeout": min(timeout_sec, 20),
+        "retries": 3,
+        "fragment_retries": 3,
         "concurrent_fragment_downloads": 5,
         "buffersize": 1024 * 1024,
         "js_runtimes": {"node": {}, "deno": {}},

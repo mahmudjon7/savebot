@@ -5,7 +5,7 @@ import tempfile
 from datetime import datetime, timezone
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 from aiogram.types import Chat, MessageOriginChannel
 from app import texts
 from app.config import settings
@@ -331,3 +331,19 @@ async def test_callback_check_sub_ignores_message_not_modified_and_channels_back
     state.clear = AsyncMock()
     await callback_channels_list(admin_cb, state)
     state.clear.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_subscription_fails_closed_on_transient_network_error(temp_db_path: str) -> None:
+    await init_db(temp_db_path)
+    await add_channel(temp_db_path, "-100123", "Sponsor", "https://t.me/sponsor")
+
+    mock_bot = MagicMock()
+    mock_bot.get_chat_member = AsyncMock(
+        side_effect=TelegramNetworkError(method=MagicMock(), message="Connection reset")
+    )
+
+    is_sub, unsub = await check_user_subscriptions(mock_bot, user_id=123, db_path=temp_db_path)
+    assert is_sub is False
+    assert len(unsub) == 1
+    assert mock_bot.get_chat_member.await_count == 3

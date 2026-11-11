@@ -162,15 +162,19 @@ async def handle_link_message(message: Message) -> None:
                     logger.info("Successfully downloaded and sent video for user %s", user_id)
 
                 except VideoTooLargeError:
+                    logger.warning("Video too large for user %s (%s)", user_id, url_key)
                     await status_msg.edit_text(texts.ERR_TOO_LARGE)
                     await record_download(settings.db_path, user_id, url_key, "failed", "too_large")
                 except VideoTooLongError:
+                    logger.warning("Video too long for user %s (%s)", user_id, url_key)
                     await status_msg.edit_text(texts.ERR_TOO_LONG)
                     await record_download(settings.db_path, user_id, url_key, "failed", "too_long")
                 except PrivateOrLoginRequiredError:
+                    logger.warning("Private/login required for user %s (%s)", user_id, url_key)
                     await status_msg.edit_text(texts.ERR_PRIVATE_OR_LOGIN)
                     await record_download(settings.db_path, user_id, url_key, "failed", "private")
                 except DownloadTimeoutError:
+                    logger.warning("Download timeout for user %s (%s)", user_id, url_key)
                     await status_msg.edit_text(texts.ERR_TIMEOUT)
                     await record_download(settings.db_path, user_id, url_key, "failed", "timeout")
                 except Exception as e:
