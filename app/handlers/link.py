@@ -12,7 +12,9 @@ from app import texts
 from app.config import settings
 from app.db import record_download, upsert_user
 from app.services.cache import get_cache_by_url, save_video_cache
+from app.services.content_filter import get_filter
 from app.services.downloader import (
+    ContentBlockedError,
     DownloadFailedError,
     DownloadTimeoutError,
     PrivateOrLoginRequiredError,
@@ -85,6 +87,16 @@ async def handle_link_message(message: Message) -> None:
         await record_download(settings.db_path, user_id, raw_url, "failed", reason)
         return
 
+    # Content policy, step 1: the user's own text and the link words (no network needed)
+    content_filter = get_filter()
+    if content_filter:
+        verdict = content_filter.check_text(message.text)
+        if verdict.blocked:
+            logger.warning("Content blocked (message) for user %s: %s [%s]", user_id, raw_url, verdict.category)
+            await message.reply(texts.ERR_CONTENT_BLOCKED)
+            await record_download(settings.db_path, user_id, raw_url, "blocked", f"content:{verdict.category}")
+            return
+
     # Follow mobile redirects if needed (e.g. facebook.com/share/v/..., fb.watch/...)
     resolved_url = await resolve_redirects(raw_url)
     if resolved_url != raw_url:
@@ -130,6 +142,7 @@ async def handle_link_message(message: Message) -> None:
                         max_duration_sec=settings.max_duration_sec,
                         timeout_sec=settings.download_timeout_sec,
                         cookies_file=settings.cookies_file,
+                        content_check=content_filter.check_info if content_filter else None,
                     )
 
                     # Send video to user
@@ -161,6 +174,10 @@ async def handle_link_message(message: Message) -> None:
                     await record_download(settings.db_path, user_id, url_key, "ok")
                     logger.info("Successfully downloaded and sent video for user %s", user_id)
 
+                except ContentBlockedError as e:
+                    logger.warning("Content blocked (metadata) for user %s (%s): %s", user_id, url_key, e)
+                    await status_msg.edit_text(texts.ERR_CONTENT_BLOCKED)
+                    await record_download(settings.db_path, user_id, url_key, "blocked", f"content:{e.category}")
                 except VideoTooLargeError:
                     logger.warning("Video too large for user %s (%s)", user_id, url_key)
                     await status_msg.edit_text(texts.ERR_TOO_LARGE)

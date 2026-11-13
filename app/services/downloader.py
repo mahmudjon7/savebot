@@ -6,7 +6,7 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 import yt_dlp
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,14 @@ class PrivateOrLoginRequiredError(DownloaderError):
     """Raised when content is private, deleted, or requires login."""
 
     pass
+
+
+class ContentBlockedError(DownloaderError):
+    """Raised when the content policy rejects the video before it is downloaded."""
+
+    def __init__(self, category: Optional[str] = None, term: Optional[str] = None, source: Optional[str] = None):
+        self.category, self.term, self.source = category, term, source
+        super().__init__(f"content blocked: {category} ({source}: {term})")
 
 
 class DownloadTimeoutError(DownloaderError):
@@ -157,8 +165,13 @@ def _sync_download_video(
     max_duration_sec: int,
     timeout_sec: int,
     cookies_file: Optional[str] = None,
+    content_check: Optional[Callable[[Dict[str, Any]], Any]] = None,
 ) -> VideoResult:
-    """Synchronous video download worker intended to run in a thread."""
+    """Synchronous video download worker intended to run in a thread.
+
+    content_check(info) -> Verdict-like object (with .blocked/.category/.term/.source).
+    It runs on yt-dlp's metadata through match_filter, i.e. BEFORE any media bytes are
+    downloaded; a blocked video raises ContentBlockedError."""
     max_file_bytes = max_file_mb * 1024 * 1024
     outtmpl = os.path.join(output_dir, "%(id)s.%(ext)s")
 
@@ -189,6 +202,18 @@ def _sync_download_video(
         },
     }
 
+    blocked_box: list = []
+    if content_check is not None:
+
+        def _match_filter(info_dict: Dict[str, Any], *, incomplete: bool = False) -> Optional[str]:
+            verdict = content_check(info_dict)
+            if verdict.blocked:
+                blocked_box.append(verdict)
+                return "Blocked by content policy"  # non-None: yt-dlp skips the download
+            return None
+
+        ydl_opts["match_filter"] = _match_filter
+
     ffmpeg_bin = _find_binary("ffmpeg")
     if os.path.dirname(ffmpeg_bin):
         ydl_opts["ffmpeg_location"] = os.path.dirname(ffmpeg_bin)
@@ -218,6 +243,9 @@ def _sync_download_video(
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             # Single-pass download for maximum speed
             download_info = ydl.extract_info(url, download=True)
+            if blocked_box:
+                v = blocked_box[0]
+                raise ContentBlockedError(v.category, v.term, v.source)
             if not download_info:
                 raise DownloadFailedError("Download failed")
 
@@ -299,6 +327,7 @@ async def download_video(
     max_duration_sec: int = 600,
     timeout_sec: int = 120,
     cookies_file: Optional[str] = None,
+    content_check: Optional[Callable[[Dict[str, Any]], Any]] = None,
 ) -> VideoResult:
     """Asynchronously download video with a timeout."""
     try:
@@ -311,6 +340,7 @@ async def download_video(
                 max_duration_sec=max_duration_sec,
                 timeout_sec=timeout_sec,
                 cookies_file=cookies_file,
+                content_check=content_check,
             ),
             timeout=float(timeout_sec),
         )

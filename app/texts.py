@@ -16,7 +16,8 @@ HELP_MESSAGE = (
     "• Pinterest\n\n"
     "<b>Cheklovlar:</b>\n"
     "• Maksimal hajm: 50 MB\n"
-    "• Maksimal davomiylik: 10 daqiqa\n\n"
+    "• Maksimal davomiylik: 10 daqiqa\n"
+    "• 18+ va nomaqbul mazmundagi videolar yuklanmaydi\n\n"
     "<i>Video linkini yuboring, qolganini o'zim bajaramiz!</i>"
 )
 
@@ -25,6 +26,7 @@ STATUS_DOWNLOADING = "⏳ Yuklanmoqda..."
 ERR_ALREADY_DOWNLOADING = "Avvalgi video yuklanyapti, biroz kuting 🙂"
 ERR_NOT_ALLOWED = "Bu sayt qo'llab-quvvatlanmaydi."
 ERR_PRIVATE_OR_LOGIN = "Bu video yopiq yoki login talab qiladi."
+ERR_CONTENT_BLOCKED = "🚫 Bu videoni yuklay olmayman. U bot qoidalariga zid."
 ERR_TOO_LARGE = "Video 50 MB dan katta, yubora olmayman."
 ERR_TOO_LONG = "Video juda uzun."
 ERR_TIMEOUT = "Yuklash juda uzoq davom etdi, keyinroq urinib ko'ring."

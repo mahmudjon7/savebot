@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     cookies_file: Optional[str] = "cookies/cookies.txt"
     db_path: str = "data/bot.db"
     log_level: str = "INFO"
+    content_filter_enabled: bool = True
+    content_filter_categories_raw: str = Field(default="", validation_alias="content_filter_categories")
+    blocked_terms_file: Optional[str] = "data/blocked_terms.txt"
     proxy: Optional[str] = None
     custom_bot_api_url: Optional[str] = None
 
@@ -52,6 +55,14 @@ class Settings(BaseSettings):
             if val.isdigit() or (val.startswith("-") and val[1:].isdigit()):
                 res.append(int(val))
         return res
+
+    @property
+    def content_filter_categories(self) -> List[str]:
+        """Parse comma-separated categories; empty means all of them."""
+        from app.services.content_filter import ALL_CATEGORIES
+
+        res = [x.strip().lower() for x in str(self.content_filter_categories_raw).split(",") if x.strip()]
+        return [c for c in res if c in ALL_CATEGORIES] or list(ALL_CATEGORIES)
 
     @property
     def allowed_domains(self) -> List[str]:
