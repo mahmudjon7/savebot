@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     db_path: str = "data/bot.db"
     log_level: str = "INFO"
     content_filter_enabled: bool = True
+    media_cache_enabled: bool = False
     content_filter_categories_raw: str = Field(default="", validation_alias="content_filter_categories")
     blocked_terms_file: Optional[str] = "data/blocked_terms.txt"
     proxy: Optional[str] = None

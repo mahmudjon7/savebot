@@ -108,7 +108,8 @@ async def handle_link_message(message: Message) -> None:
     url_key = normalize_url(raw_url)
 
     # Cache lookup
-    cached = await get_cache_by_url(settings.db_path, url_key)
+    # Cache is off by default: nothing about sent videos is kept in the DB.
+    cached = await get_cache_by_url(settings.db_path, url_key) if settings.media_cache_enabled else None
     if cached and cached.video_file_id:
         logger.info("Cache hit for user %s: %s", user_id, url_key)
         try:
@@ -157,7 +158,7 @@ async def handle_link_message(message: Message) -> None:
                     )
 
                     # Store Telegram file_id in cache
-                    if sent_msg.video:
+                    if settings.media_cache_enabled and sent_msg.video:
                         await save_video_cache(
                             db_path=settings.db_path,
                             url_key=url_key,
