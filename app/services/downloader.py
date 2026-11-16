@@ -150,6 +150,9 @@ def _classify_yt_dlp_error(err_str: str) -> DownloaderError:
             "members-only",
             "video unavailable",
             "private video",
+            "isn't available to everyone",
+            "can't be seen by certain audiences",
+            "login required",
         )
     ):
         return PrivateOrLoginRequiredError(err_str)
