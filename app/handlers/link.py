@@ -23,6 +23,7 @@ from app.services.downloader import (
     download_video,
 )
 from app.services.limiter import UserBusyError, limiter
+from app.services.referral import confirm_and_notify, video_branding
 from app.services.subscription import check_user_subscriptions, get_subscription_keyboard
 from app.services.urls import extract_first_url, normalize_url, resolve_redirects, validate_url
 
@@ -79,6 +80,9 @@ async def handle_link_message(message: Message) -> None:
         await message.reply(texts.SUB_REQUIRED, reply_markup=keyboard, parse_mode="HTML")
         return
 
+    # A user who got through the subscription check counts as a confirmed referral
+    await confirm_and_notify(message.bot, settings.db_path, user_id)
+
     # Validate URL against allowlist and SSRF checks
     is_valid, reason = validate_url(raw_url, settings.allowed_domains)
     if not is_valid:
@@ -114,10 +118,12 @@ async def handle_link_message(message: Message) -> None:
         logger.info("Cache hit for user %s: %s", user_id, url_key)
         try:
             await message.bot.send_chat_action(chat_id=message.chat.id, action="upload_video")
+            caption, share_markup = await video_branding(message.bot, user_id, cached.platform)
             await _send_video_with_retry(
                 message=message,
                 video=cached.video_file_id,
-                caption=cached.platform or "Video",
+                caption=caption,
+                reply_markup=share_markup,
                 supports_streaming=True,
             )
             await record_download(settings.db_path, user_id, url_key, "cache_hit")
@@ -146,14 +152,16 @@ async def handle_link_message(message: Message) -> None:
                         content_check=content_filter.check_info if content_filter else None,
                     )
 
-                    # Send video to user
+                    # Send video to user, branded with the bot name and a share button
+                    caption, share_markup = await video_branding(message.bot, user_id, video_res.platform)
                     sent_msg = await _send_video_with_retry(
                         message=message,
                         video=FSInputFile(video_res.file_path),
                         width=video_res.width,
                         height=video_res.height,
                         duration=video_res.duration,
-                        caption=video_res.platform or "Video",
+                        caption=caption,
+                        reply_markup=share_markup,
                         supports_streaming=True,
                     )
 

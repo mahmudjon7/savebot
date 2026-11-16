@@ -60,6 +60,15 @@ CREATE TABLE IF NOT EXISTS autopromo (
     last_error    TEXT
 );
 
+CREATE TABLE IF NOT EXISTS referrals (
+    invitee_id    INTEGER PRIMARY KEY,
+    inviter_id    INTEGER NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    confirmed_at  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_referrals_inviter ON referrals(inviter_id, status);
 CREATE INDEX IF NOT EXISTS idx_media_cache_url_key ON media_cache(url_key);
 CREATE INDEX IF NOT EXISTS idx_downloads_created_at ON downloads(created_at);
 """
@@ -314,3 +323,83 @@ async def update_autopromo(db_path: str, **fields: Any) -> None:
         await db.execute("INSERT OR IGNORE INTO autopromo (id) VALUES (1);")
         await db.execute(f"UPDATE autopromo SET {assignments} WHERE id = 1;", values)
         await db.commit()
+
+
+# ---------------- REFERRALS (TAKLIF TIZIMI) ----------------
+
+async def is_known_user(db_path: str, user_id: int) -> bool:
+    """True if this Telegram user was ever seen: in users, in download history or as an invitee."""
+    sql = """
+    SELECT 1 WHERE EXISTS (SELECT 1 FROM users WHERE user_id = ?)
+        OR EXISTS (SELECT 1 FROM downloads WHERE user_id = ?)
+        OR EXISTS (SELECT 1 FROM referrals WHERE invitee_id = ?);
+    """
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute(sql, (user_id, user_id, user_id)) as cursor:
+            return (await cursor.fetchone()) is not None
+
+
+async def register_referral(db_path: str, inviter_id: int, invitee_id: int) -> bool:
+    """Record a pending referral. Counts only real, different users; one record per invitee ever."""
+    if inviter_id == invitee_id:
+        return False
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute("SELECT 1 FROM users WHERE user_id = ?;", (inviter_id,)) as cursor:
+            if (await cursor.fetchone()) is None:
+                return False
+        cursor = await db.execute(
+            "INSERT OR IGNORE INTO referrals (invitee_id, inviter_id, status) VALUES (?, ?, 'pending');",
+            (invitee_id, inviter_id),
+        )
+        await db.commit()
+        return cursor.rowcount == 1
+
+
+async def confirm_referral(db_path: str, invitee_id: int) -> Optional[int]:
+    """Confirm the invitee's pending referral (once). Returns the inviter's ID only on the confirming call."""
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute(
+            "UPDATE referrals SET status = 'confirmed', confirmed_at = strftime('%Y-%m-%d %H:%M:%f', 'now') "
+            "WHERE invitee_id = ? AND status = 'pending';",
+            (invitee_id,),
+        )
+        await db.commit()
+        if cursor.rowcount != 1:
+            return None
+        async with db.execute("SELECT inviter_id FROM referrals WHERE invitee_id = ?;", (invitee_id,)) as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row else None
+
+
+async def get_referral_counts(db_path: str, inviter_id: int) -> Dict[str, int]:
+    """Return confirmed and pending referral counts for one inviter."""
+    sql = """
+    SELECT
+        COALESCE(SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END), 0),
+        COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0)
+    FROM referrals WHERE inviter_id = ?;
+    """
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute(sql, (inviter_id,)) as cursor:
+            row = await cursor.fetchone()
+    return {"confirmed": int(row[0]), "pending": int(row[1])}
+
+
+async def get_leaderboard(db_path: str) -> List[Dict[str, Any]]:
+    """All inviters with at least one confirmed referral, best first (equal counts: who reached it earlier)."""
+    sql = """
+    SELECT r.inviter_id, COUNT(*) AS c, MAX(r.confirmed_at) AS reached_at, u.username
+    FROM referrals r
+    LEFT JOIN users u ON u.user_id = r.inviter_id
+    WHERE r.status = 'confirmed'
+    GROUP BY r.inviter_id
+    ORDER BY c DESC, reached_at ASC, r.inviter_id ASC;
+    """
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute(sql) as cursor:
+            rows = await cursor.fetchall()
+    return [
+        {"rank": i, "user_id": row[0], "count": int(row[1]), "username": row[3]}
+        for i, row in enumerate(rows, start=1)
+    ]
+

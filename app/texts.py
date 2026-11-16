@@ -164,3 +164,27 @@ PROMO_FINISHED = (
     "Chat: <b>{chat}</b>\n\n"
     "Qayta boshlash: /admin → «Avto-reklama»."
 )
+
+# Referral (taklif) and video branding texts
+VIDEO_BRAND = "📥 @{bot} orqali yuklandi"
+SHARE_TEXT = "📥 TikTok, Instagram, YouTube va boshqa videolarni bir zumda yuklab oling!"
+REF_BTN_SHARE = "📤 Do'stga ulashish"
+REF_BTN_INVITE = "👥 Do'stlarni taklif qilish"
+REF_BTN_TOP = "🏆 TOP taklifchilar"
+REF_MY_INFO = (
+    "👥 <b>Do'stlarni taklif qilish</b>\n\n"
+    "Sizning havolangiz:\n<code>{link}</code>\n\n"
+    "✅ Tasdiqlangan takliflar: <b>{confirmed}</b>\n"
+    "⏳ Kutilayotgan: <b>{pending}</b>\n"
+    "🏅 Reytingdagi o'rningiz: <b>{rank}</b>\n\n"
+    "<i>Taklif quyidagi hollarda sanaladi: do'stingiz botni <b>birinchi marta</b> ochsa va barcha homiy kanallarga obuna bo'lsa. "
+    "Botdan avval foydalangan odamlar va o'zingiz sanalmaydi.</i>"
+)
+REF_RANK_NONE = "hali yo'q"
+REF_NEW_FRIEND = "🎉 Yangi do'stingiz botga qo'shildi!\nTasdiqlangan takliflaringiz: <b>{count}</b>"
+REF_TOP_TITLE = "🏆 <b>TOP taklifchilar</b>\n\n{rows}"
+REF_TOP_ROW = "{medal} {name} — <b>{count}</b>"
+REF_TOP_EMPTY = "Hozircha hech kim do'st taklif qilmagan. Birinchi bo'ling! 🚀"
+REF_TOP_YOU = "\n\nSizning o'rningiz: <b>{rank}</b> ({count} ta taklif)"
+REF_TOP_YOU_NONE = "\n\nSiz hali hech kimni taklif qilmagansiz. «Do'stlarni taklif qilish» tugmasini bosing."
+REF_ANON_NAME = "Foydalanuvchi …{tail}"

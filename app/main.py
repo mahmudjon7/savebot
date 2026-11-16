@@ -9,6 +9,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand
 
 from app.config import settings
 from app.db import init_db
@@ -53,6 +54,18 @@ async def main() -> None:
     dp.include_router(start.router)
     dp.include_router(admin.router)
     dp.include_router(link.router)
+
+    try:
+        await bot.set_my_commands(
+            [
+                BotCommand(command="start", description="Botni ishga tushirish"),
+                BotCommand(command="taklif", description="Do'stlarni taklif qilish"),
+                BotCommand(command="top", description="TOP taklifchilar"),
+                BotCommand(command="help", description="Yordam"),
+            ]
+        )
+    except Exception as e:  # noqa: BLE001 - commands menu is optional
+        logger.warning("Could not set bot commands: %s", e)
 
     logger.info("Bot configured successfully. Starting polling...")
     promo_task = asyncio.create_task(run_autopromo_scheduler(bot, settings.db_path))
