@@ -14,6 +14,7 @@ from app.config import settings
 from app.db import init_db
 from app.handlers import admin, link, start
 from app.logging_setup import setup_logging
+from app.services.autopromo import run_autopromo_scheduler
 
 logger = logging.getLogger("clipgrab.main")
 
@@ -54,12 +55,15 @@ async def main() -> None:
     dp.include_router(link.router)
 
     logger.info("Bot configured successfully. Starting polling...")
+    promo_task = asyncio.create_task(run_autopromo_scheduler(bot, settings.db_path))
     try:
         await dp.start_polling(
             bot,
             allowed_updates=["message", "callback_query", "chat_join_request", "chat_member"],
         )
     finally:
+        promo_task.cancel()
+        await asyncio.gather(promo_task, return_exceptions=True)
         await bot.session.close()
 
 

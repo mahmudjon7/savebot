@@ -45,6 +45,21 @@ CREATE TABLE IF NOT EXISTS join_requests (
     PRIMARY KEY (user_id, channel_id)
 );
 
+CREATE TABLE IF NOT EXISTS autopromo (
+    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled       INTEGER NOT NULL DEFAULT 0,
+    chat_id       TEXT,
+    chat_title    TEXT,
+    interval_min  INTEGER NOT NULL DEFAULT 60,
+    src_chat_id   INTEGER,
+    src_message_id INTEGER,
+    src_kind      TEXT,
+    duration_h    INTEGER NOT NULL DEFAULT 10,
+    end_ts        INTEGER NOT NULL DEFAULT 0,
+    last_sent_ts  INTEGER NOT NULL DEFAULT 0,
+    last_error    TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_media_cache_url_key ON media_cache(url_key);
 CREATE INDEX IF NOT EXISTS idx_downloads_created_at ON downloads(created_at);
 """
@@ -241,3 +256,61 @@ async def get_stats_24h(db_path: str) -> Dict[str, Any]:
         "failures": failures,
         "hit_rate": hit_rate,
     }
+
+
+# ---------------- AUTO-PROMO (single-chat self advertising) ----------------
+
+_AUTOPROMO_FIELDS = {
+    "enabled",
+    "chat_id",
+    "chat_title",
+    "interval_min",
+    "src_chat_id",
+    "src_message_id",
+    "src_kind",
+    "duration_h",
+    "end_ts",
+    "last_sent_ts",
+    "last_error",
+}
+
+
+async def get_autopromo(db_path: str) -> Dict[str, Any]:
+    """Return the auto-promo settings row, creating the default row when missing."""
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("INSERT OR IGNORE INTO autopromo (id) VALUES (1);")
+        await db.commit()
+        async with db.execute(
+            "SELECT enabled, chat_id, chat_title, interval_min, src_chat_id, src_message_id, src_kind, "
+            "duration_h, end_ts, last_sent_ts, last_error "
+            "FROM autopromo WHERE id = 1;"
+        ) as cursor:
+            row = await cursor.fetchone()
+    return {
+        "enabled": bool(row[0]),
+        "chat_id": row[1],
+        "chat_title": row[2],
+        "interval_min": int(row[3]),
+        "src_chat_id": row[4],
+        "src_message_id": row[5],
+        "src_kind": row[6],
+        "duration_h": int(row[7]),
+        "end_ts": int(row[8]),
+        "last_sent_ts": int(row[9]),
+        "last_error": row[10],
+    }
+
+
+async def update_autopromo(db_path: str, **fields: Any) -> None:
+    """Update selected auto-promo settings (only known column names are accepted)."""
+    unknown = set(fields) - _AUTOPROMO_FIELDS
+    if unknown:
+        raise ValueError(f"Unknown autopromo fields: {sorted(unknown)}")
+    if not fields:
+        return
+    assignments = ", ".join(f"{name} = ?" for name in fields)
+    values = [int(v) if isinstance(v, bool) else v for v in fields.values()]
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("INSERT OR IGNORE INTO autopromo (id) VALUES (1);")
+        await db.execute(f"UPDATE autopromo SET {assignments} WHERE id = 1;", values)
+        await db.commit()

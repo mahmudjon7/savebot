@@ -44,6 +44,7 @@ ADMIN_BTN_STATS = "📊 Statistika"
 ADMIN_BTN_BROADCAST = "📢 Reklama tarqatish"
 ADMIN_BTN_CHANNELS = "📢 Homiy kanallar"
 ADMIN_BTN_UPDATE_YTDLP = "🔄 yt-dlp yangilash"
+ADMIN_BTN_PROMO = "📣 Avto-reklama"
 ADMIN_BTN_BACK = "◀️ Orqaga"
 ADMIN_BTN_ADD_CHANNEL = "➕ Yangi kanal qo'shish"
 
@@ -115,3 +116,51 @@ CHANNEL_ADD_INVALID_URL = (
 CHANNEL_ADD_NOT_CHANNEL = "❌ Bu kanal yoki guruh emas. Iltimos, kanal kiriting yoki kanaldan post forward qiling."
 CHANNEL_DELETED_SUCCESS = "✅ Homiy kanal o'chirildi: <code>{channel_id}</code>"
 CHANNEL_INVALID_URL_ALERT = "⚠️ Kanal havolasi noto'g'ri saqlangan. Uni o'chirib qayta qo'shing."
+
+# Auto-promo texts
+AD_RECEIVED = "✅ <b>Reklama qabul qilindi</b> ({kind}).\n\nQayerga yuboramiz?"
+AD_BTN_USERS = "👥 Foydalanuvchilarga yuborish"
+AD_BTN_CHANNEL = "📣 Kanal/guruhga avto-reklama"
+AD_BTN_CANCEL = "❌ Bekor qilish"
+PROMO_MENU = (
+    "📣 <b>Avto-reklama</b>\n\n"
+    "Oxirgi yuborgan reklamangiz (video, rasm yoki matn) tanlangan <b>bitta</b> kanal/guruhga "
+    "avtomatik qaytarib turiladi.\n\n"
+    "Holat: <b>{status}</b>\n"
+    "🎯 Chat: <b>{chat}</b>\n"
+    "⏱ Har: <b>{interval}</b> da\n"
+    "⏳ Davomiyligi: <b>{duration}</b>{remaining}\n"
+    "🎬 Reklama: <b>{ad}</b>\n\n"
+    "{error_line}"
+    "<i>Yoqilganda birinchi reklama darhol chiqadi, keyin tanlangan intervalda takrorlanadi.</i>"
+)
+PROMO_REMAINING = " (qoldi: {left})"
+PROMO_AD_NONE = "hali yo'q (avval «Reklama tarqatish» orqali yuboring)"
+PROMO_AD_SAVED = "{kind} (saqlangan)"
+PROMO_ERROR_LINE = "⚠️ Oxirgi xatolik: <code>{error}</code>\n\n"
+PROMO_BTN_ENABLE = "▶️ Yoqish"
+PROMO_BTN_DISABLE = "⏸ O'chirish"
+PROMO_BTN_CHAT = "🎯 Chatni tanlash"
+PROMO_BTN_INTERVAL = "⏱ Intervalni tanlash"
+PROMO_BTN_DURATION = "⏳ Davomiyligini tanlash"
+PROMO_BTN_NOW = "📤 Hozir yuborish"
+PROMO_NEED_CHAT = "Avval reklama yuboriladigan chatni tanlang."
+PROMO_NEED_AD = "Avval «Reklama tarqatish» orqali reklamani yuboring."
+PROMO_CHOOSE_CHAT = (
+    "🎯 <b>1/3. Reklama yuboriladigan chatni tanlang</b>\n\n"
+    "Faqat «Homiy kanallar» ro'yxatidagi, bot admin bo'lgan kanal/guruhlar chiqadi."
+)
+PROMO_NO_CHANNELS = (
+    "📢 Homiy kanallar ro'yxati bo'sh.\n\n"
+    "Avval «Homiy kanallar» bo'limida kanal/guruh qo'shing (bot u yerda admin bo'lishi shart)."
+)
+PROMO_CHOOSE_INTERVAL = "⏱ <b>2/3. Reklama necha vaqtda bir yuborilsin?</b>"
+PROMO_CHOOSE_DURATION = "⏳ <b>3/3. Avto-reklama necha soat davom etsin?</b>\n\nBelgilangan vaqt tugagach bot o'zi to'xtaydi."
+PROMO_STARTED_TOAST = "✅ Avto-reklama boshlandi"
+PROMO_SENT_OK = "✅ Reklama yuborildi."
+PROMO_SENT_FAIL = "❌ Yuborib bo'lmadi: {error}"
+PROMO_FINISHED = (
+    "⏹ <b>Avto-reklama muddati tugadi</b> va to'xtatildi.\n"
+    "Chat: <b>{chat}</b>\n\n"
+    "Qayta boshlash: /admin → «Avto-reklama»."
+)

@@ -5,6 +5,7 @@ import html
 import logging
 import subprocess
 import sys
+import time
 from typing import List, Optional, Tuple, Union
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
@@ -25,11 +26,22 @@ from app.config import settings
 from app.db import (
     add_channel,
     get_all_user_ids,
+    get_autopromo,
     get_channels,
     get_stats_24h,
     remove_channel,
     remove_channel_by_id,
     remove_user,
+    update_autopromo,
+)
+from app.services.autopromo import (
+    ALLOWED_DURATIONS,
+    ALLOWED_INTERVALS,
+    DURATION_CHOICES,
+    INTERVAL_CHOICES,
+    describe_message,
+    run_promo_once,
+    start_promo,
 )
 from app.services.subscription import normalize_channel_url, parse_channel_identifier
 
@@ -59,6 +71,7 @@ def get_admin_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text=texts.ADMIN_BTN_CHANNELS, callback_data="admin:channels"),
                 InlineKeyboardButton(text=texts.ADMIN_BTN_UPDATE_YTDLP, callback_data="admin:update_ytdlp"),
             ],
+            [InlineKeyboardButton(text=texts.ADMIN_BTN_PROMO, callback_data="promo:menu")],
         ]
     )
 
@@ -144,28 +157,59 @@ async def callback_broadcast_start(callback: CallbackQuery, state: FSMContext) -
 
 @router.message(AdminStates.waiting_for_broadcast)
 async def process_broadcast_message(message: Message, state: FSMContext) -> None:
-    """Broadcast the received message to all users in the database."""
+    """Remember the ad the admin sent and ask where to send it (users or channel auto-promo)."""
     if not message.from_user or not is_admin(message.from_user.id):
         return
 
     await state.clear()
-    status_msg = await message.reply(texts.BROADCAST_PROGRESS)
+    kind = describe_message(message)
+    await update_autopromo(
+        settings.db_path,
+        src_chat_id=message.chat.id,
+        src_message_id=message.message_id,
+        src_kind=kind,
+        last_error=None,
+    )
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=texts.AD_BTN_USERS, callback_data="bc:users")],
+            [InlineKeyboardButton(text=texts.AD_BTN_CHANNEL, callback_data="promo:chat:w")],
+            [InlineKeyboardButton(text=texts.AD_BTN_CANCEL, callback_data="admin:menu")],
+        ]
+    )
+    await message.reply(texts.AD_RECEIVED.format(kind=kind), reply_markup=keyboard, parse_mode="HTML")
 
+
+@router.callback_query(F.data == "bc:users")
+async def callback_broadcast_to_users(callback: CallbackQuery) -> None:
+    """Send the saved ad to every user in the database."""
+    if not callback.from_user or not is_admin(callback.from_user.id):
+        await callback.answer(texts.ADMIN_ONLY, show_alert=True)
+        return
+    cfg = await get_autopromo(settings.db_path)
+    if not cfg["src_message_id"]:
+        await callback.answer(texts.PROMO_NEED_AD, show_alert=True)
+        return
+    await callback.answer()
+    status_msg = callback.message
+    await status_msg.edit_text(texts.BROADCAST_PROGRESS)
+
+    bot = callback.bot
+    src_chat, src_msg = int(cfg["src_chat_id"]), int(cfg["src_message_id"])
     user_ids = await get_all_user_ids(settings.db_path)
     total = len(user_ids)
     sent = 0
     blocked = 0
 
     for uid in user_ids:
-        # Don't send to admin themselves if desired, but fine either way
         try:
-            await message.copy_to(chat_id=uid)
+            await bot.copy_message(chat_id=uid, from_chat_id=src_chat, message_id=src_msg)
             sent += 1
             await asyncio.sleep(0.04)  # ~25 messages/second to prevent flood limits
         except TelegramRetryAfter as e:
             await asyncio.sleep(e.retry_after + 1)
             try:
-                await message.copy_to(chat_id=uid)
+                await bot.copy_message(chat_id=uid, from_chat_id=src_chat, message_id=src_msg)
                 sent += 1
             except Exception:
                 pass
@@ -419,6 +463,284 @@ async def process_channel_add(message: Message, state: FSMContext) -> None:
         )
     else:
         await message.reply(texts.CHANNEL_ADD_FAILED, reply_markup=get_admin_menu_keyboard(), parse_mode="HTML")
+
+
+# ---------------- AUTO-PROMO (AVTO-REKLAMA) ----------------
+
+def _interval_label(minutes: int) -> str:
+    for value, label in INTERVAL_CHOICES:
+        if value == minutes:
+            return label
+    return f"{minutes} daqiqa"
+
+
+def _duration_label(hours: int) -> str:
+    for value, label in DURATION_CHOICES:
+        if value == hours:
+            return label
+    return f"{hours} soat"
+
+
+def _left_label(seconds: int) -> str:
+    minutes = max(int(seconds) // 60, 0)
+    hours, mins = divmod(minutes, 60)
+    return f"{hours} soat {mins} daqiqa" if hours else f"{mins} daqiqa"
+
+
+async def render_promo_menu(message: Message, is_edit: bool = True) -> None:
+    """Show auto-promo status and its control buttons."""
+    cfg = await get_autopromo(settings.db_path)
+    error_line = (
+        texts.PROMO_ERROR_LINE.format(error=html.escape(cfg["last_error"])) if cfg["last_error"] else ""
+    )
+    remaining = ""
+    if cfg["enabled"] and cfg["end_ts"]:
+        remaining = texts.PROMO_REMAINING.format(left=_left_label(cfg["end_ts"] - time.time()))
+    text = texts.PROMO_MENU.format(
+        status="🟢 Yoniq" if cfg["enabled"] else "🔴 O'chiq",
+        chat=html.escape(cfg["chat_title"] or "tanlanmagan"),
+        interval=_interval_label(cfg["interval_min"]),
+        duration=_duration_label(cfg["duration_h"]),
+        remaining=remaining,
+        ad=(
+            texts.PROMO_AD_SAVED.format(kind=cfg["src_kind"] or "xabar")
+            if cfg["src_message_id"]
+            else texts.PROMO_AD_NONE
+        ),
+        error_line=error_line,
+    )
+    toggle_text = texts.PROMO_BTN_DISABLE if cfg["enabled"] else texts.PROMO_BTN_ENABLE
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=toggle_text, callback_data="promo:toggle")],
+            [
+                InlineKeyboardButton(text=texts.PROMO_BTN_CHAT, callback_data="promo:chat"),
+                InlineKeyboardButton(text=texts.PROMO_BTN_INTERVAL, callback_data="promo:interval"),
+            ],
+            [InlineKeyboardButton(text=texts.PROMO_BTN_DURATION, callback_data="promo:duration")],
+            [InlineKeyboardButton(text=texts.PROMO_BTN_NOW, callback_data="promo:now")],
+            [InlineKeyboardButton(text=texts.ADMIN_BTN_BACK, callback_data="admin:menu")],
+        ]
+    )
+    if is_edit:
+        await message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+    else:
+        await message.reply(text, reply_markup=markup, parse_mode="HTML")
+
+
+def _is_wizard(data: str) -> bool:
+    """Callback data ending in ':w' means the admin is in the step-by-step setup after sending an ad."""
+    return data.endswith(":w")
+
+
+async def _show_chat_picker(message: Message, wizard: bool) -> None:
+    channels = await get_channels(settings.db_path)
+    suffix = ":w" if wizard else ""
+    rows: List[List[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                text=f"📢 {ch['title'] or ch['channel_id']}",
+                callback_data=f"promo:setchat:{ch['id']}{suffix}",
+            )
+        ]
+        for ch in channels
+    ]
+    back = "admin:menu" if wizard else "promo:menu"
+    rows.append([InlineKeyboardButton(text=texts.ADMIN_BTN_BACK, callback_data=back)])
+    await message.edit_text(
+        texts.PROMO_CHOOSE_CHAT if channels else texts.PROMO_NO_CHANNELS,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        parse_mode="HTML",
+    )
+
+
+async def _show_interval_picker(message: Message, wizard: bool) -> None:
+    suffix = ":w" if wizard else ""
+    buttons = [
+        InlineKeyboardButton(text=label, callback_data=f"promo:setint:{minutes}{suffix}")
+        for minutes, label in INTERVAL_CHOICES
+    ]
+    rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(text=texts.ADMIN_BTN_BACK, callback_data="promo:menu")])
+    await message.edit_text(
+        texts.PROMO_CHOOSE_INTERVAL, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="HTML"
+    )
+
+
+async def _show_duration_picker(message: Message, wizard: bool) -> None:
+    suffix = ":w" if wizard else ""
+    buttons = [
+        InlineKeyboardButton(text=label, callback_data=f"promo:setdur:{hours}{suffix}")
+        for hours, label in DURATION_CHOICES
+    ]
+    rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(text=texts.ADMIN_BTN_BACK, callback_data="promo:menu")])
+    await message.edit_text(
+        texts.PROMO_CHOOSE_DURATION, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "promo:menu")
+async def callback_promo_menu(callback: CallbackQuery, state: FSMContext) -> None:
+    """Open the auto-promo menu."""
+    if not callback.from_user or not is_admin(callback.from_user.id):
+        await callback.answer(texts.ADMIN_ONLY, show_alert=True)
+        return
+    await state.clear()
+    if callback.message:
+        await render_promo_menu(callback.message, is_edit=True)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "promo:toggle")
+async def callback_promo_toggle(callback: CallbackQuery) -> None:
+    """Enable or disable auto-promo."""
+    if not callback.from_user or not is_admin(callback.from_user.id):
+        await callback.answer(texts.ADMIN_ONLY, show_alert=True)
+        return
+    cfg = await get_autopromo(settings.db_path)
+    if cfg["enabled"]:
+        await update_autopromo(settings.db_path, enabled=False, end_ts=0)
+    else:
+        if not cfg["chat_id"]:
+            await callback.answer(texts.PROMO_NEED_CHAT, show_alert=True)
+            return
+        if not cfg["src_message_id"]:
+            await callback.answer(texts.PROMO_NEED_AD, show_alert=True)
+            return
+        await start_promo(settings.db_path)
+    if callback.message:
+        await render_promo_menu(callback.message, is_edit=True)
+    await callback.answer()
+
+
+@router.callback_query(F.data.in_({"promo:chat", "promo:chat:w"}))
+async def callback_promo_chat(callback: CallbackQuery) -> None:
+    """List sponsor channels/groups to choose the ad target from."""
+    if not callback.from_user or not is_admin(callback.from_user.id):
+        await callback.answer(texts.ADMIN_ONLY, show_alert=True)
+        return
+    if callback.message:
+        await _show_chat_picker(callback.message, _is_wizard(callback.data))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("promo:setchat:"))
+async def callback_promo_set_chat(callback: CallbackQuery) -> None:
+    """Save the chosen sponsor channel as the single ad target."""
+    if not callback.from_user or not is_admin(callback.from_user.id):
+        await callback.answer(texts.ADMIN_ONLY, show_alert=True)
+        return
+    wizard = _is_wizard(callback.data)
+    raw = callback.data.split("promo:setchat:", 1)[1].removesuffix(":w")
+    channels = await get_channels(settings.db_path)
+    chosen = next((ch for ch in channels if str(ch["id"]) == raw), None)
+    if not chosen:
+        await callback.answer(texts.CHANNEL_ADD_FAILED.split("\n")[0], show_alert=True)
+        return
+    await update_autopromo(
+        settings.db_path,
+        chat_id=str(chosen["channel_id"]),
+        chat_title=chosen["title"] or str(chosen["channel_id"]),
+        last_error=None,
+    )
+    if callback.message:
+        if wizard:
+            await _show_interval_picker(callback.message, True)
+        else:
+            await render_promo_menu(callback.message, is_edit=True)
+    await callback.answer()
+
+
+@router.callback_query(F.data.in_({"promo:interval", "promo:interval:w"}))
+async def callback_promo_interval(callback: CallbackQuery) -> None:
+    """Show interval choices."""
+    if not callback.from_user or not is_admin(callback.from_user.id):
+        await callback.answer(texts.ADMIN_ONLY, show_alert=True)
+        return
+    if callback.message:
+        await _show_interval_picker(callback.message, _is_wizard(callback.data))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("promo:setint:"))
+async def callback_promo_set_interval(callback: CallbackQuery) -> None:
+    """Save the chosen interval."""
+    if not callback.from_user or not is_admin(callback.from_user.id):
+        await callback.answer(texts.ADMIN_ONLY, show_alert=True)
+        return
+    wizard = _is_wizard(callback.data)
+    raw = callback.data.split("promo:setint:", 1)[1].removesuffix(":w")
+    if not raw.isdigit() or int(raw) not in ALLOWED_INTERVALS:
+        await callback.answer("Noto'g'ri interval", show_alert=True)
+        return
+    await update_autopromo(settings.db_path, interval_min=int(raw))
+    if callback.message:
+        if wizard:
+            await _show_duration_picker(callback.message, True)
+        else:
+            await render_promo_menu(callback.message, is_edit=True)
+    await callback.answer()
+
+
+@router.callback_query(F.data.in_({"promo:duration", "promo:duration:w"}))
+async def callback_promo_duration(callback: CallbackQuery) -> None:
+    """Show duration (hours) choices."""
+    if not callback.from_user or not is_admin(callback.from_user.id):
+        await callback.answer(texts.ADMIN_ONLY, show_alert=True)
+        return
+    if callback.message:
+        await _show_duration_picker(callback.message, _is_wizard(callback.data))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("promo:setdur:"))
+async def callback_promo_set_duration(callback: CallbackQuery) -> None:
+    """Save the duration; in the setup wizard this also starts the auto-promo."""
+    if not callback.from_user or not is_admin(callback.from_user.id):
+        await callback.answer(texts.ADMIN_ONLY, show_alert=True)
+        return
+    wizard = _is_wizard(callback.data)
+    raw = callback.data.split("promo:setdur:", 1)[1].removesuffix(":w")
+    if not raw.isdigit() or int(raw) not in ALLOWED_DURATIONS:
+        await callback.answer("Noto'g'ri davomiylik", show_alert=True)
+        return
+    hours = int(raw)
+    await update_autopromo(settings.db_path, duration_h=hours)
+    toast = None
+    if wizard:
+        await start_promo(settings.db_path)
+        toast = texts.PROMO_STARTED_TOAST
+    else:
+        cfg = await get_autopromo(settings.db_path)
+        if cfg["enabled"]:  # a running promo gets the new duration counted from now
+            await update_autopromo(settings.db_path, end_ts=int(time.time()) + hours * 3600)
+    if callback.message:
+        await render_promo_menu(callback.message, is_edit=True)
+    await callback.answer(toast)
+
+
+@router.callback_query(F.data == "promo:now")
+async def callback_promo_now(callback: CallbackQuery) -> None:
+    """Send one ad right now to the chosen chat (test)."""
+    if not callback.from_user or not is_admin(callback.from_user.id):
+        await callback.answer(texts.ADMIN_ONLY, show_alert=True)
+        return
+    cfg = await get_autopromo(settings.db_path)
+    if not cfg["chat_id"]:
+        await callback.answer(texts.PROMO_NEED_CHAT, show_alert=True)
+        return
+    if not cfg["src_message_id"]:
+        await callback.answer(texts.PROMO_NEED_AD, show_alert=True)
+        return
+    await callback.answer("⏳")
+    error = await run_promo_once(callback.bot, settings.db_path, force=True)
+    if callback.message:
+        await callback.message.reply(
+            texts.PROMO_SENT_FAIL.format(error=html.escape(error)) if error else texts.PROMO_SENT_OK,
+            parse_mode="HTML",
+        )
+        await render_promo_menu(callback.message, is_edit=True)
 
 
 # ---------------- UPDATE YT-DLP ----------------
