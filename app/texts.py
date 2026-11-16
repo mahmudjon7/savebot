@@ -58,7 +58,9 @@ STATS_TEMPLATE = (
     "📢 Homiy kanallar soni: <b>{total_channels}</b>\n"
     "📥 Jami yuklash so'rovlari: <b>{total_downloads}</b>\n"
     "⚡ Keshdan yuborilgan: <b>{cache_hits}</b> ({hit_rate:.1f}%)\n"
-    "❌ Xatoliklar soni: <b>{failures}</b>"
+    "❌ Yuklash xatoliklari: <b>{failures}</b>\n"
+    "🔗 Rad etilgan havolalar (qo'llab-quvvatlanmaydigan sayt va h.k.): <b>{rejected}</b>\n"
+    "🚫 Qoidaga zid kontent (bloklangan): <b>{blocked}</b>"
 )
 
 # Broadcast texts

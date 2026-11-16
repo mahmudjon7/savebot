@@ -128,6 +128,8 @@ async def callback_stats(callback: CallbackQuery) -> None:
         cache_hits=stats["cache_hits"],
         hit_rate=stats["hit_rate"],
         failures=stats["failures"],
+        rejected=stats["rejected"],
+        blocked=stats["blocked"],
     )
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text=texts.ADMIN_BTN_BACK, callback_data="admin:menu")]]

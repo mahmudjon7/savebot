@@ -193,3 +193,19 @@ async def test_start_flow_new_user_without_sponsors_counts_immediately(db_path, 
     await _start(db_path, monkeypatch, msg, "ref_1")
     assert await get_referral_counts(db_path, 1) == {"confirmed": 1, "pending": 0}
     assert msg.answer.await_args.kwargs["reply_markup"] is not None  # welcome has invite/TOP buttons
+
+
+async def test_stats_separate_rejected_links_from_real_failures(db_path):
+    from app.db import get_stats_24h
+
+    await init_db(db_path)
+    await record_download(db_path, 1, "https://t.me/shop", "rejected", "Domain not in allowed platforms")
+    await record_download(db_path, 1, "https://t.me/old", "failed", "Domain not in allowed platforms")  # old rows
+    await record_download(db_path, 1, "https://tiktok.com/x", "failed", "timeout")
+    await record_download(db_path, 1, "https://tiktok.com/y", "blocked", "content:adult")
+    await record_download(db_path, 1, "https://tiktok.com/z", "ok")
+    stats = await get_stats_24h(db_path)
+    assert stats["total_downloads"] == 5
+    assert stats["failures"] == 1      # only the real timeout
+    assert stats["rejected"] == 2
+    assert stats["blocked"] == 1

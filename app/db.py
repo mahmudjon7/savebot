@@ -4,6 +4,15 @@ import os
 from typing import Any, Dict, List, Optional
 import aiosqlite
 
+# validate_url() reasons: the bot refused these links before trying to download anything.
+REJECTED_REASONS = (
+    "Invalid URL structure",
+    "Only HTTP and HTTPS schemes are supported",
+    "Missing hostname",
+    "Direct IP addresses and local networks are not allowed",
+    "Domain not in allowed platforms",
+)
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS users (
     user_id     INTEGER PRIMARY KEY,
@@ -241,11 +250,16 @@ async def get_stats_24h(db_path: str) -> Dict[str, Any]:
             total_channels = row[0] if row else 0
 
         # Downloads in the last 24h
-        sql_24h = """
+        # Links the bot never tried to download (unsupported site, bad URL) are "rejected", not errors.
+        # Older rows stored them as 'failed' with one of these reasons, so count those as rejected too.
+        reasons = ", ".join(f"'{r}'" for r in REJECTED_REASONS)
+        sql_24h = f"""
         SELECT
             COUNT(*),
             SUM(CASE WHEN status = 'cache_hit' THEN 1 ELSE 0 END),
-            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END)
+            SUM(CASE WHEN status = 'failed' AND COALESCE(error, '') NOT IN ({reasons}) THEN 1 ELSE 0 END),
+            SUM(CASE WHEN status = 'rejected' OR (status = 'failed' AND error IN ({reasons})) THEN 1 ELSE 0 END),
+            SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END)
         FROM downloads
         WHERE created_at >= datetime('now', '-1 day');
         """
@@ -254,6 +268,8 @@ async def get_stats_24h(db_path: str) -> Dict[str, Any]:
             total_downloads = row[0] if row and row[0] else 0
             cache_hits = row[1] if row and row[1] else 0
             failures = row[2] if row and row[2] else 0
+            rejected = row[3] if row and row[3] else 0
+            blocked = row[4] if row and row[4] else 0
 
     hit_rate = (cache_hits / total_downloads * 100) if total_downloads > 0 else 0.0
 
@@ -263,6 +279,8 @@ async def get_stats_24h(db_path: str) -> Dict[str, Any]:
         "total_downloads": total_downloads,
         "cache_hits": cache_hits,
         "failures": failures,
+        "rejected": rejected,
+        "blocked": blocked,
         "hit_rate": hit_rate,
     }
 

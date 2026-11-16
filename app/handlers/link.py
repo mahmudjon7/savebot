@@ -88,7 +88,7 @@ async def handle_link_message(message: Message) -> None:
     if not is_valid:
         logger.info("URL validation rejected for user %s: %s (reason: %s)", user_id, raw_url, reason)
         await message.reply(texts.ERR_NOT_ALLOWED)
-        await record_download(settings.db_path, user_id, raw_url, "failed", reason)
+        await record_download(settings.db_path, user_id, raw_url, "rejected", reason)
         return
 
     # Content policy, step 1: the user's own text and the link words (no network needed)
