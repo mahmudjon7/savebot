@@ -18,6 +18,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app import texts
 from app.db import confirm_referral, get_leaderboard, get_referral_counts
+from app.services.contest import is_contest_active
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +63,14 @@ async def video_branding(bot: Bot, user_id: int, platform: Optional[str]) -> Tup
     return caption, markup
 
 
-def referral_menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=texts.REF_BTN_INVITE, callback_data="ref:me")],
-            [InlineKeyboardButton(text=texts.REF_BTN_TOP, callback_data="ref:top")],
-        ]
-    )
+def referral_menu_keyboard(contest_active: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=texts.REF_BTN_INVITE, callback_data="ref:me")],
+        [InlineKeyboardButton(text=texts.REF_BTN_TOP, callback_data="ref:top")],
+    ]
+    if contest_active:
+        rows.insert(0, [InlineKeyboardButton(text=texts.CT_BTN_OPEN, callback_data="ct:me")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def confirm_and_notify(bot: Bot, db_path: str, invitee_id: int) -> bool:
@@ -94,6 +96,9 @@ def _display_name(username: Optional[str], user_id: int) -> str:
     return texts.REF_ANON_NAME.format(tail=str(user_id)[-4:])
 
 
+display_name = _display_name
+
+
 async def render_my_referrals(bot: Bot, db_path: str, user_id: int) -> Tuple[str, InlineKeyboardMarkup]:
     """Personal invite link, counts and rank, with a share button."""
     username = await _bot_username(bot)
@@ -107,13 +112,13 @@ async def render_my_referrals(bot: Bot, db_path: str, user_id: int) -> Tuple[str
         pending=counts["pending"],
         rank=mine["rank"] if mine else texts.REF_RANK_NONE,
     )
-    markup = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=texts.REF_BTN_SHARE, url=share_url(link))],
-            [InlineKeyboardButton(text=texts.REF_BTN_TOP, callback_data="ref:top")],
-        ]
-    )
-    return text, markup
+    rows = [
+        [InlineKeyboardButton(text=texts.REF_BTN_SHARE, url=share_url(link))],
+        [InlineKeyboardButton(text=texts.REF_BTN_TOP, callback_data="ref:top")],
+    ]
+    if await is_contest_active(db_path):
+        rows.append([InlineKeyboardButton(text=texts.CT_BTN_OPEN, callback_data="ct:me")])
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def render_top(db_path: str, user_id: int) -> str:

@@ -77,6 +77,30 @@ CREATE TABLE IF NOT EXISTS referrals (
     confirmed_at  TEXT
 );
 
+CREATE TABLE IF NOT EXISTS contest (
+    id             INTEGER PRIMARY KEY CHECK (id = 1),
+    status         TEXT NOT NULL DEFAULT 'off',
+    days           INTEGER NOT NULL DEFAULT 15,
+    min_invites    INTEGER NOT NULL DEFAULT 10,
+    winners_count  INTEGER NOT NULL DEFAULT 3,
+    started_at     TEXT,
+    ends_at        TEXT
+);
+
+CREATE TABLE IF NOT EXISTS contest_members (
+    user_id       INTEGER PRIMARY KEY,
+    joined_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now')),
+    disqualified  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS contest_winners (
+    user_id   INTEGER PRIMARY KEY,
+    place     INTEGER NOT NULL,
+    kind      TEXT NOT NULL,
+    invites   INTEGER NOT NULL,
+    notified  INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_referrals_inviter ON referrals(inviter_id, status);
 CREATE INDEX IF NOT EXISTS idx_media_cache_url_key ON media_cache(url_key);
 CREATE INDEX IF NOT EXISTS idx_downloads_created_at ON downloads(created_at);
@@ -89,7 +113,9 @@ async def init_db(db_path: str) -> None:
     if db_dir:
         os.makedirs(db_dir, exist_ok=True)
 
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
+        # WAL: readers don't block the writer and many users can write at once
+        await db.execute("PRAGMA journal_mode=WAL")
         await db.executescript(SCHEMA_SQL)
         await db.commit()
 
@@ -103,7 +129,7 @@ async def upsert_user(db_path: str, user_id: int, username: Optional[str] = None
         username = excluded.username,
         last_seen = datetime('now');
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         await db.execute(sql, (user_id, username))
         await db.commit()
 
@@ -111,7 +137,7 @@ async def upsert_user(db_path: str, user_id: int, username: Optional[str] = None
 async def get_all_user_ids(db_path: str) -> List[int]:
     """Retrieve all user IDs for broadcasting."""
     sql = "SELECT user_id FROM users;"
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         async with db.execute(sql) as cursor:
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
@@ -120,7 +146,7 @@ async def get_all_user_ids(db_path: str) -> List[int]:
 async def remove_user(db_path: str, user_id: int) -> None:
     """Remove user from database (e.g., if user blocked the bot)."""
     sql = "DELETE FROM users WHERE user_id = ?;"
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         await db.execute(sql, (user_id,))
         await db.commit()
 
@@ -135,7 +161,7 @@ async def add_channel(db_path: str, channel_id: str, title: str, url: str) -> bo
         url = excluded.url;
     """
     try:
-        async with aiosqlite.connect(db_path) as db:
+        async with aiosqlite.connect(db_path, timeout=30) as db:
             await db.execute(sql, (str(channel_id), title, url))
             await db.commit()
             return True
@@ -146,7 +172,7 @@ async def add_channel(db_path: str, channel_id: str, title: str, url: str) -> bo
 async def remove_channel(db_path: str, channel_id: str) -> bool:
     """Remove a sponsor channel."""
     sql = "DELETE FROM channels WHERE channel_id = ?;"
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         cursor = await db.execute(sql, (str(channel_id),))
         await db.commit()
         return cursor.rowcount > 0
@@ -154,7 +180,7 @@ async def remove_channel(db_path: str, channel_id: str) -> bool:
 
 async def remove_channel_by_id(db_path: str, row_id: int) -> Optional[str]:
     """Remove a sponsor channel by its primary key ID and return its channel_id."""
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         async with db.execute("SELECT channel_id FROM channels WHERE id = ?;", (row_id,)) as cursor:
             row = await cursor.fetchone()
         if not row:
@@ -174,7 +200,7 @@ async def add_join_request(db_path: str, user_id: int, channel_ids: List[str]) -
     ON CONFLICT(user_id, channel_id) DO UPDATE SET
         created_at = datetime('now');
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         await db.executemany(sql, [(user_id, cid) for cid in channel_ids])
         await db.commit()
 
@@ -185,7 +211,7 @@ async def has_join_request(db_path: str, user_id: int, channel_ids: List[str]) -
         return False
     placeholders = ", ".join("?" for _ in channel_ids)
     sql = f"SELECT 1 FROM join_requests WHERE user_id = ? AND channel_id IN ({placeholders}) LIMIT 1;"
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         async with db.execute(sql, (user_id, *channel_ids)) as cursor:
             return (await cursor.fetchone()) is not None
 
@@ -196,7 +222,7 @@ async def remove_join_request(db_path: str, user_id: int, channel_ids: List[str]
         return
     placeholders = ", ".join("?" for _ in channel_ids)
     sql = f"DELETE FROM join_requests WHERE user_id = ? AND channel_id IN ({placeholders});"
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         await db.execute(sql, (user_id, *channel_ids))
         await db.commit()
 
@@ -204,7 +230,7 @@ async def remove_join_request(db_path: str, user_id: int, channel_ids: List[str]
 async def get_channels(db_path: str) -> List[Dict[str, Any]]:
     """Retrieve all sponsor channels."""
     sql = "SELECT id, channel_id, title, url, created_at FROM channels ORDER BY id ASC;"
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         async with db.execute(sql) as cursor:
             rows = await cursor.fetchall()
             return [
@@ -231,14 +257,14 @@ async def record_download(
     INSERT INTO downloads (user_id, url_key, status, error, created_at)
     VALUES (?, ?, ?, ?, datetime('now'));
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         await db.execute(sql, (user_id, url_key, status, error))
         await db.commit()
 
 
 async def get_stats_24h(db_path: str) -> Dict[str, Any]:
     """Calculate usage statistics for the last 24 hours."""
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         # Total registered users
         async with db.execute("SELECT COUNT(*) FROM users") as cursor:
             row = await cursor.fetchone()
@@ -304,7 +330,7 @@ _AUTOPROMO_FIELDS = {
 
 async def get_autopromo(db_path: str) -> Dict[str, Any]:
     """Return the auto-promo settings row, creating the default row when missing."""
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         await db.execute("INSERT OR IGNORE INTO autopromo (id) VALUES (1);")
         await db.commit()
         async with db.execute(
@@ -337,7 +363,7 @@ async def update_autopromo(db_path: str, **fields: Any) -> None:
         return
     assignments = ", ".join(f"{name} = ?" for name in fields)
     values = [int(v) if isinstance(v, bool) else v for v in fields.values()]
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         await db.execute("INSERT OR IGNORE INTO autopromo (id) VALUES (1);")
         await db.execute(f"UPDATE autopromo SET {assignments} WHERE id = 1;", values)
         await db.commit()
@@ -352,7 +378,7 @@ async def is_known_user(db_path: str, user_id: int) -> bool:
         OR EXISTS (SELECT 1 FROM downloads WHERE user_id = ?)
         OR EXISTS (SELECT 1 FROM referrals WHERE invitee_id = ?);
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         async with db.execute(sql, (user_id, user_id, user_id)) as cursor:
             return (await cursor.fetchone()) is not None
 
@@ -361,7 +387,7 @@ async def register_referral(db_path: str, inviter_id: int, invitee_id: int) -> b
     """Record a pending referral. Counts only real, different users; one record per invitee ever."""
     if inviter_id == invitee_id:
         return False
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         async with db.execute("SELECT 1 FROM users WHERE user_id = ?;", (inviter_id,)) as cursor:
             if (await cursor.fetchone()) is None:
                 return False
@@ -375,7 +401,7 @@ async def register_referral(db_path: str, inviter_id: int, invitee_id: int) -> b
 
 async def confirm_referral(db_path: str, invitee_id: int) -> Optional[int]:
     """Confirm the invitee's pending referral (once). Returns the inviter's ID only on the confirming call."""
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         cursor = await db.execute(
             "UPDATE referrals SET status = 'confirmed', confirmed_at = strftime('%Y-%m-%d %H:%M:%f', 'now') "
             "WHERE invitee_id = ? AND status = 'pending';",
@@ -397,7 +423,7 @@ async def get_referral_counts(db_path: str, inviter_id: int) -> Dict[str, int]:
         COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0)
     FROM referrals WHERE inviter_id = ?;
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         async with db.execute(sql, (inviter_id,)) as cursor:
             row = await cursor.fetchone()
     return {"confirmed": int(row[0]), "pending": int(row[1])}
@@ -413,7 +439,7 @@ async def get_leaderboard(db_path: str) -> List[Dict[str, Any]]:
     GROUP BY r.inviter_id
     ORDER BY c DESC, reached_at ASC, r.inviter_id ASC;
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         async with db.execute(sql) as cursor:
             rows = await cursor.fetchall()
     return [

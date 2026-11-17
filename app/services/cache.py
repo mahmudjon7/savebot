@@ -25,7 +25,7 @@ async def get_cache_by_url(db_path: str, url_key: str) -> Optional[CacheEntry]:
     WHERE url_key = ?
     LIMIT 1;
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         async with db.execute(sql, (url_key,)) as cursor:
             row = await cursor.fetchone()
             if row:
@@ -41,7 +41,7 @@ async def get_cache_by_id(db_path: str, row_id: int) -> Optional[CacheEntry]:
     WHERE id = ?
     LIMIT 1;
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         async with db.execute(sql, (row_id,)) as cursor:
             row = await cursor.fetchone()
             if row:
@@ -63,7 +63,7 @@ async def save_video_cache(
         platform = excluded.platform,
         video_file_id = excluded.video_file_id;
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         await db.execute(sql, (url_key, platform, video_file_id))
         await db.commit()
 
@@ -80,6 +80,6 @@ async def save_audio_cache(
 ) -> None:
     """Save audio file_id to existing cache entry by ID."""
     sql = "UPDATE media_cache SET audio_file_id = ? WHERE id = ?;"
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(db_path, timeout=30) as db:
         await db.execute(sql, (audio_file_id, row_id))
         await db.commit()

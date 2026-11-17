@@ -72,6 +72,7 @@ def get_admin_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text=texts.ADMIN_BTN_UPDATE_YTDLP, callback_data="admin:update_ytdlp"),
             ],
             [InlineKeyboardButton(text=texts.ADMIN_BTN_PROMO, callback_data="promo:menu")],
+            [InlineKeyboardButton(text=texts.ADMIN_BTN_CONTEST, callback_data="contest:menu")],
         ]
     )
 

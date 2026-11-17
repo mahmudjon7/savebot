@@ -17,6 +17,7 @@ from app.db import (
     remove_join_request,
     upsert_user,
 )
+from app.services.contest import START_PAYLOAD, is_contest_active
 from app.services.referral import (
     confirm_and_notify,
     parse_ref_payload,
@@ -96,7 +97,16 @@ async def handle_start(message: Message, state: FSMContext, command: Optional[Co
         return
 
     await confirm_and_notify(message.bot, settings.db_path, message.from_user.id)
-    await message.answer(texts.START_WELCOME, reply_markup=referral_menu_keyboard(), parse_mode="HTML")
+
+    # Opened from the contest announcement button: start the bot and explain the rules right away.
+    if command and command.args == START_PAYLOAD and await is_contest_active(settings.db_path):
+        from app.handlers.contest import render_user_contest  # lazy: handlers.contest imports admin
+
+        text, markup = await render_user_contest(message.bot, settings.db_path, message.from_user.id)
+        await message.answer(text, reply_markup=markup, parse_mode="HTML")
+        return
+
+    await message.answer(texts.START_WELCOME, reply_markup=referral_menu_keyboard(await is_contest_active(settings.db_path)), parse_mode="HTML")
 
 
 @router.message(Command("help"))
@@ -126,7 +136,7 @@ async def callback_check_subscription(callback: CallbackQuery) -> None:
 
     if is_sub:
         await confirm_and_notify(callback.bot, settings.db_path, callback.from_user.id)
-        keyboard = referral_menu_keyboard()
+        keyboard = referral_menu_keyboard(await is_contest_active(settings.db_path))
         try:
             await callback.message.edit_text(texts.SUB_CHECK_SUCCESS, reply_markup=keyboard, parse_mode="HTML")
         except TelegramBadRequest as e:

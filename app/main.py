@@ -14,8 +14,10 @@ from aiogram.types import BotCommand
 from app.config import settings
 from app.db import init_db
 from app.handlers import admin, link, start
+from app.handlers import contest as contest_handlers
 from app.logging_setup import setup_logging
 from app.services.autopromo import run_autopromo_scheduler
+from app.services.contest import run_contest_scheduler
 
 logger = logging.getLogger("clipgrab.main")
 
@@ -53,6 +55,7 @@ async def main() -> None:
     # Register handlers
     dp.include_router(start.router)
     dp.include_router(admin.router)
+    dp.include_router(contest_handlers.router)
     dp.include_router(link.router)
 
     try:
@@ -61,6 +64,7 @@ async def main() -> None:
                 BotCommand(command="start", description="Botni ishga tushirish"),
                 BotCommand(command="taklif", description="Do'stlarni taklif qilish"),
                 BotCommand(command="top", description="TOP taklifchilar"),
+                BotCommand(command="konkurs", description="Konkurs"),
                 BotCommand(command="help", description="Yordam"),
             ]
         )
@@ -69,6 +73,7 @@ async def main() -> None:
 
     logger.info("Bot configured successfully. Starting polling...")
     promo_task = asyncio.create_task(run_autopromo_scheduler(bot, settings.db_path))
+    contest_task = asyncio.create_task(run_contest_scheduler(bot, settings.db_path))
     try:
         await dp.start_polling(
             bot,
@@ -76,7 +81,8 @@ async def main() -> None:
         )
     finally:
         promo_task.cancel()
-        await asyncio.gather(promo_task, return_exceptions=True)
+        contest_task.cancel()
+        await asyncio.gather(promo_task, contest_task, return_exceptions=True)
         await bot.session.close()
 
 
