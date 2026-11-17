@@ -66,8 +66,11 @@ async def handle_link_message(message: Message) -> None:
     user_id = message.from_user.id
     username = message.from_user.username
 
-    # Register/update user activity
-    await upsert_user(settings.db_path, user_id=user_id, username=username)
+    # Only people who talk to the bot in a private chat are "users" (we can message them).
+    # Someone who just posted a link in a group is not registered.
+    is_private = message.chat.type == "private"
+    if is_private:
+        await upsert_user(settings.db_path, user_id=user_id, username=username)
 
     # Check sponsor channel subscription
     is_sub, unsub = await check_user_subscriptions(
@@ -87,7 +90,8 @@ async def handle_link_message(message: Message) -> None:
     is_valid, reason = validate_url(raw_url, settings.allowed_domains)
     if not is_valid:
         logger.info("URL validation rejected for user %s: %s (reason: %s)", user_id, raw_url, reason)
-        await message.reply(texts.ERR_NOT_ALLOWED)
+        if is_private:  # stay silent in groups: unsupported links (e.g. t.me ads) are not our business
+            await message.reply(texts.ERR_NOT_ALLOWED)
         await record_download(settings.db_path, user_id, raw_url, "rejected", reason)
         return
 

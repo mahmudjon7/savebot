@@ -66,6 +66,11 @@ async def handle_start(message: Message, state: FSMContext, command: Optional[Co
 
     await state.clear()
 
+    if message.chat.type != "private":
+        # Not a private chat: do not register the sender and do not count referrals.
+        await message.answer(texts.START_WELCOME, parse_mode="HTML")
+        return
+
     inviter_id = parse_ref_payload(command.args if command else None)
     # Decide "new user" BEFORE we register this user, otherwise nobody would ever be new.
     was_new = inviter_id is not None and not await is_known_user(settings.db_path, message.from_user.id)
@@ -97,7 +102,7 @@ async def handle_start(message: Message, state: FSMContext, command: Optional[Co
 @router.message(Command("help"))
 async def handle_help(message: Message) -> None:
     """Handle /help command with instructions and limits."""
-    if message.from_user:
+    if message.from_user and message.chat.type == "private":
         await upsert_user(
             db_path=settings.db_path,
             user_id=message.from_user.id,
@@ -143,7 +148,8 @@ async def handle_invite_command(message: Message) -> None:
     """Show the user's referral link, counts and rank."""
     if not message.from_user:
         return
-    await upsert_user(settings.db_path, message.from_user.id, message.from_user.username)
+    if message.chat.type == "private":
+        await upsert_user(settings.db_path, message.from_user.id, message.from_user.username)
     text, markup = await render_my_referrals(message.bot, settings.db_path, message.from_user.id)
     await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
@@ -161,7 +167,8 @@ async def callback_my_referrals(callback: CallbackQuery) -> None:
     """Button: personal invite link and stats."""
     if not callback.from_user or not callback.message:
         return
-    await upsert_user(settings.db_path, callback.from_user.id, callback.from_user.username)
+    if callback.message.chat.type == "private":
+        await upsert_user(settings.db_path, callback.from_user.id, callback.from_user.username)
     text, markup = await render_my_referrals(callback.bot, settings.db_path, callback.from_user.id)
     await callback.message.answer(text, reply_markup=markup, parse_mode="HTML")
     await callback.answer()

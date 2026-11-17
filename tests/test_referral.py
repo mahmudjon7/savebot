@@ -147,6 +147,7 @@ def _message(user_id=50, username="newbie"):
     m = MagicMock()
     m.from_user.id = user_id
     m.from_user.username = username
+    m.chat.type = "private"
     m.bot = _bot()
     m.answer = AsyncMock()
     return m
@@ -209,3 +210,49 @@ async def test_stats_separate_rejected_links_from_real_failures(db_path):
     assert stats["failures"] == 1      # only the real timeout
     assert stats["rejected"] == 2
     assert stats["blocked"] == 1
+
+
+async def _send_link(db_path, monkeypatch, chat_type, url="https://t.me/some_shop", user_id=300):
+    from app.config import settings
+    from app.handlers import link
+
+    monkeypatch.setattr(settings, "db_path", db_path)
+    monkeypatch.setattr(link, "check_user_subscriptions", AsyncMock(return_value=(True, [])))
+    monkeypatch.setattr(link, "confirm_and_notify", AsyncMock())
+    msg = _message(user_id=user_id)
+    msg.chat.type = chat_type
+    msg.text = url
+    msg.reply = AsyncMock()
+    await link.handle_link_message(msg)
+    return msg
+
+
+async def test_group_link_does_not_register_user_and_unsupported_link_is_silent(db_path, monkeypatch):
+    from app.db import get_all_user_ids, get_stats_24h
+
+    await init_db(db_path)
+    msg = await _send_link(db_path, monkeypatch, "supergroup")
+    assert await get_all_user_ids(db_path) == []          # group member is not a bot user
+    msg.reply.assert_not_called()                          # no noise in the group
+    assert (await get_stats_24h(db_path))["rejected"] == 1  # but it still shows in the statistics
+
+
+async def test_private_chat_registers_user_and_explains_unsupported_link(db_path, monkeypatch):
+    from app.db import get_all_user_ids
+
+    await init_db(db_path)
+    msg = await _send_link(db_path, monkeypatch, "private", user_id=301)
+    assert await get_all_user_ids(db_path) == [301]
+    assert "qo'llab-quvvatlanmaydi" in msg.reply.await_args.args[0]
+
+
+async def test_start_in_group_registers_nobody_and_counts_no_referral(db_path, monkeypatch):
+    from app.db import get_all_user_ids
+
+    await init_db(db_path)
+    await upsert_user(db_path, 1, "alice")
+    msg = _message(user_id=400)
+    msg.chat.type = "supergroup"
+    await _start(db_path, monkeypatch, msg, "ref_1")
+    assert await get_all_user_ids(db_path) == [1]
+    assert await get_referral_counts(db_path, 1) == {"confirmed": 0, "pending": 0}

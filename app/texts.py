@@ -24,7 +24,11 @@ HELP_MESSAGE = (
 STATUS_DOWNLOADING = "⏳ Yuklanmoqda..."
 
 ERR_ALREADY_DOWNLOADING = "Avvalgi video yuklanyapti, biroz kuting 🙂"
-ERR_NOT_ALLOWED = "Bu sayt qo'llab-quvvatlanmaydi."
+ERR_NOT_ALLOWED = (
+    "ℹ️ Bu havola qo'llab-quvvatlanmaydi.\n\n"
+    "Bot YouTube, TikTok, Instagram, Facebook, X (Twitter) va Pinterest dagi videolarni yuklaydi. "
+    "Shunday havola yuboring 👇"
+)
 ERR_PRIVATE_OR_LOGIN = "Bu video yopiq yoki login talab qiladi."
 ERR_CONTENT_BLOCKED = "🚫 Bu videoni yuklay olmayman. U bot qoidalariga zid."
 ERR_TOO_LARGE = "Video 50 MB dan katta, yubora olmayman."
