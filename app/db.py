@@ -101,6 +101,28 @@ CREATE TABLE IF NOT EXISTS contest_winners (
     notified  INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS contest_post (
+    id              INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled         INTEGER NOT NULL DEFAULT 0,
+    chat_id         TEXT,
+    chat_title      TEXT,
+    kind            TEXT,
+    body            TEXT,
+    file_id         TEXT,
+    interval_h      INTEGER NOT NULL DEFAULT 6,
+    last_sent_ts    INTEGER NOT NULL DEFAULT 0,
+    last_edit_date  TEXT,
+    last_error      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS contest_posts (
+    chat_id     TEXT NOT NULL,
+    message_id  INTEGER NOT NULL,
+    kind        TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    PRIMARY KEY (chat_id, message_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_referrals_inviter ON referrals(inviter_id, status);
 CREATE INDEX IF NOT EXISTS idx_media_cache_url_key ON media_cache(url_key);
 CREATE INDEX IF NOT EXISTS idx_downloads_created_at ON downloads(created_at);

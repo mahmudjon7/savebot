@@ -221,8 +221,9 @@ CT_RULES = (
     "🎲 Qolgan o'rinlar: shartni bajarganlar orasidan tasodifiy tanlanadi\n"
     "Natijani admin tekshiradi. Soxta akkauntlar orqali olingan takliflar hisobga olinmaydi, "
     "qoidani buzgan odam konkursdan chetlatiladi.\n\n"
-    "⏳ Tugashiga: <b>{left}</b>\n"
-    "Muddat tugagach g'oliblarga shu bot orqali xabar beriladi."
+    "⏳ Konkursga <b>{left}</b> qoldi.\n"
+    "📅 <b>{last}</b> kuni soat 23:59 gacha (Toshkent vaqti) qatnashish mumkin, g'oliblar shundan keyin aniqlanadi.\n"
+    "Natija chiqqach g'oliblarga shu bot orqali xabar beriladi."
 )
 CT_MEMBER_INFO = (
     "\n\n✅ <b>Siz konkursdasiz!</b>\n"
@@ -251,13 +252,13 @@ CT_ADMIN_MENU = (
     "Sovg'a: <b>{prize}</b>\n"
     "Shart: kamida <b>{min}</b> ta taklif\n"
     "G'oliblar soni: <b>{winners}</b>\n"
-    "Davomiyligi: <b>{days}</b> kun (yangi konkurs boshlanganda qo'llanadi)\n"
+    "Davomiyligi: <b>{days}</b> kun (yangi konkurs boshlanganda so'raladi)\n"
     "Qatnashuvchilar: <b>{members}</b>{extra}"
 )
 CT_STATUS_OFF = "🔴 O'chiq"
 CT_STATUS_RUNNING = "🟢 Davom etmoqda"
 CT_STATUS_ENDED = "🏁 Yakunlangan"
-CT_EXTRA_LEFT = "\nTugashiga: <b>{left}</b>"
+CT_EXTRA_LEFT = "\nTugashiga: <b>{left}</b> ({last} gacha)"
 CT_EXTRA_QUALIFIED = "\nShartni bajarganlar: <b>{count}</b>"
 CT_BTN_START = "▶️ Konkursni boshlash"
 CT_BTN_FINISH = "🏁 Hozir yakunlash"
@@ -307,9 +308,46 @@ CT_ANNOUNCE_CONFIRM = (
 CT_ANNOUNCE = (
     "🎁 <b>KONKURS! {prize} yutib oling!</b>\n\n"
     "<b>{winners} ta g'olib</b>. Qatnashish oson: pastdagi tugmani bosing, bot qoidalarni o'zi tushuntiradi.\n\n"
-    "⏳ Tugashiga: <b>{left}</b>"
+    "⏳ Qatnashish muddati: <b>{last}</b> gacha"
 )
 CT_ANNOUNCE_BTN = "🎁 Konkursda qatnashish"
 CT_ANNOUNCE_DONE = "📣 E'lon yuborildi: {sent} ta, yetib bormadi: {blocked} ta.\n\nKanalga qo'yish uchun e'lonni o'zingizga kelgan xabardan forward qiling."
 CT_ANNOUNCE_NOT_ACTIVE = "Avval konkursni boshlang."
 CT_EXTRA_LINK = "\nKonkurs havolasi (kanal/guruhga qo'yish uchun):\n<code>{link}</code>"
+
+CT_LAST_DAY = "1 kun (bugun oxirgi kun!)"
+CT_FEW_HOURS = "bir necha soat"
+CT_POST_FOOTER = "\n\n⏳ <b>Konkursga {left} qoldi</b> · {last} gacha"
+CT_POST_FOOTER_DONE = "\n\n🏁 <b>{note}</b>"
+CT_POST_ENDED = "Konkurs yakunlandi!"
+CT_POST_CANCELLED = "Konkurs to'xtatildi."
+
+CT_PICK_START_DAYS = (
+    "⏳ <b>1/3. Konkurs necha kun davom etsin?</b>\n\n"
+    "Qolgan kunlar soni har kuni tun 00:00 da (Toshkent vaqti) o'zi kamayib boradi."
+)
+CT_PICK_POST_CHAT = "📢 <b>2/3. E'lon qaysi kanal yoki guruhga yuborilsin?</b>\n\nBot o'sha yerda admin bo'lishi kerak."
+CT_NO_POST_CHANNELS = (
+    "📢 Kanal yoki guruh topilmadi.\n\n"
+    "Avval «Homiy kanallar» bo'limiga kanal/guruh qo'shing (bot u yerda admin bo'lsin)."
+)
+CT_BTN_NO_POST = "⏭ E'lonsiz boshlash"
+CT_ASK_POST_CONTENT = (
+    "📝 <b>3/3. E'lon uchun matn, rasm yoki video yuboring.</b>\n\n"
+    "Rasm yoki video bo'lsa, matnni izoh sifatida yozing.\n"
+    "Bot oxiriga «Konkursga N kun qoldi» qatorini va «Qatnashish» tugmasini o'zi qo'shadi, "
+    "kunlar soni har kuni avtomatik yangilanadi.\n\n"
+    "Bekor qilish: /cancel"
+)
+CT_POST_TOO_LONG = "⚠️ Matn juda uzun ({n} belgi). Ko'pi bilan {limit} belgi yozing va qayta yuboring."
+CT_POST_BAD_TYPE = "⚠️ Faqat matn, rasm yoki video yuboring."
+CT_PICK_POST_INTERVAL = "⏱ <b>E'lon necha soatda bir marta yuborilsin?</b>"
+CT_POST_INTERVAL_LABEL = "Har {h} soatda"
+CT_BTN_POST = "📌 E'lonni sozlash"
+CT_BTN_POST_NOW = "📤 E'lonni hozir yuborish"
+CT_POST_SENT_OK = "✅ E'lon yuborildi"
+CT_POST_FAIL = "❌ E'lonni yuborib bo'lmadi: {error}\n\nBot o'sha kanal/guruhda admin ekanini tekshiring."
+CT_POST_NOT_READY = "E'lon hali sozlanmagan"
+CT_EXTRA_POST = "\n📌 E'lon: <b>{chat}</b>, har <b>{h}</b> soatda"
+CT_EXTRA_POST_OFF = "\n📌 E'lon kanalga yuborilmaydi"
+CT_EXTRA_POST_ERROR = "\n⚠️ E'lon xatosi: {error}"

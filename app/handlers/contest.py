@@ -1,16 +1,19 @@
 """Referral contest: user screens (/konkurs, join, rating) and the admin panel."""
 
+import asyncio
 import html
 import logging
-from typing import List, Tuple
+from typing import Any, List, Set, Tuple
 
 from aiogram import F, Router
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app import texts
 from app.config import settings
-from app.db import get_all_user_ids, upsert_user
+from app.db import get_all_user_ids, get_channels, upsert_user
 from app.handlers.admin import is_admin
 from app.services import contest as ct
 from app.services.referral import display_name, make_ref_link, share_url
@@ -21,13 +24,18 @@ router = Router(name="contest")
 _MEDALS = ["🥇", "🥈", "🥉"]
 
 
-def left_label(seconds: int) -> str:
-    seconds = max(int(seconds), 0)
-    days, rest = divmod(seconds, 86400)
-    hours, rest = divmod(rest, 3600)
-    if days:
-        return texts.CT_DAYS_LEFT.format(days=days, hours=hours)
-    return texts.CT_HOURS_LEFT.format(hours=hours, minutes=rest // 60)
+class ContestStates(StatesGroup):
+    waiting_post = State()
+
+
+_background: Set[asyncio.Task] = set()
+
+
+def _run_in_background(coro: Any) -> None:
+    """Fire-and-forget (slow Telegram edits must not keep the admin waiting); keep a reference so it isn't GC'd."""
+    task = asyncio.create_task(coro)
+    _background.add(task)
+    task.add_done_callback(_background.discard)
 
 
 # ---------------------------------------------------------------- users
@@ -41,7 +49,8 @@ async def render_user_contest(bot, db_path: str, user_id: int) -> Tuple[str, Inl
         prize=texts.CONTEST_PRIZE,
         min=cfg["min_invites"],
         winners=cfg["winners_count"],
-        left=left_label(cfg["seconds_left"]),
+        left=ct.left_text(cfg),
+        last=ct.last_day_label(cfg),
     )
     member = await ct.get_member(db_path, user_id)
     rows: List[List[InlineKeyboardButton]] = []
@@ -149,7 +158,16 @@ async def render_contest_menu(db_path: str, bot=None) -> Tuple[str, InlineKeyboa
     }.get(cfg["status"], texts.CT_STATUS_OFF)
     extra = ""
     if cfg["status"] == "running":
-        extra += texts.CT_EXTRA_LEFT.format(left=left_label(cfg["seconds_left"]))
+        extra += texts.CT_EXTRA_LEFT.format(left=ct.left_text(cfg), last=ct.last_day_label(cfg))
+        post = await ct.get_post(db_path)
+        if post["enabled"] and post["chat_id"]:
+            extra += texts.CT_EXTRA_POST.format(
+                chat=html.escape(post["chat_title"] or str(post["chat_id"])), h=post["interval_h"]
+            )
+        else:
+            extra += texts.CT_EXTRA_POST_OFF
+        if post["last_error"]:
+            extra += texts.CT_EXTRA_POST_ERROR.format(error=html.escape(post["last_error"]))
         if bot is not None:
             extra += texts.CT_EXTRA_LINK.format(link=ct.contest_link((await bot.me()).username or ""))
     if cfg["status"] in ("running", "ended"):
@@ -172,6 +190,12 @@ async def render_contest_menu(db_path: str, bot=None) -> Tuple[str, InlineKeyboa
             [
                 InlineKeyboardButton(text=texts.CT_BTN_FINISH, callback_data="contest:finish"),
                 InlineKeyboardButton(text=texts.CT_BTN_CANCEL, callback_data="contest:cancel"),
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(text=texts.CT_BTN_POST, callback_data="contest:post"),
+                InlineKeyboardButton(text=texts.CT_BTN_POST_NOW, callback_data="contest:postnow"),
             ]
         )
         rows.append([InlineKeyboardButton(text=texts.CT_BTN_ANNOUNCE, callback_data="contest:announce")])
@@ -234,20 +258,190 @@ async def _show_menu(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data == "contest:menu")
-async def callback_contest_menu(callback: CallbackQuery) -> None:
+async def callback_contest_menu(callback: CallbackQuery, state: FSMContext) -> None:
     if not await _guard(callback):
         return
+    await state.clear()
     await _show_menu(callback)
     await callback.answer()
 
 
+def _picker_rows(buttons: List[InlineKeyboardButton], per_row: int = 3) -> List[List[InlineKeyboardButton]]:
+    return [buttons[i : i + per_row] for i in range(0, len(buttons), per_row)]
+
+
+def _back_row() -> List[InlineKeyboardButton]:
+    return [InlineKeyboardButton(text=texts.ADMIN_BTN_BACK, callback_data="contest:menu")]
+
+
 @router.callback_query(F.data == "contest:start")
 async def callback_contest_start(callback: CallbackQuery) -> None:
+    """Step 1/3 of the start wizard: how many days the contest lasts."""
     if not await _guard(callback):
         return
-    await ct.start_contest(settings.db_path)
+    buttons = [
+        InlineKeyboardButton(text=f"{n} kun", callback_data=f"contest:sd:{n}") for n in ct.DAYS_CHOICES
+    ]
+    markup = InlineKeyboardMarkup(inline_keyboard=_picker_rows(buttons) + [_back_row()])
+    await callback.message.edit_text(texts.CT_PICK_START_DAYS, reply_markup=markup, parse_mode="HTML")
+    await callback.answer()
+
+
+async def _show_post_chat_picker(message: Message, allow_skip: bool) -> None:
+    """Step 2/3: which channel or group the announcement goes to (the ones the bot administers)."""
+    channels = await get_channels(settings.db_path)
+    rows: List[List[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text=f"📢 {ch['title'] or ch['channel_id']}", callback_data=f"contest:pc:{ch['id']}")]
+        for ch in channels
+    ]
+    if allow_skip:
+        rows.append([InlineKeyboardButton(text=texts.CT_BTN_NO_POST, callback_data="contest:pc:0")])
+    rows.append(_back_row())
+    await message.edit_text(
+        texts.CT_PICK_POST_CHAT if channels else texts.CT_NO_POST_CHANNELS,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("contest:sd:"))
+async def callback_contest_start_days(callback: CallbackQuery) -> None:
+    if not await _guard(callback):
+        return
+    raw = callback.data.rsplit(":", 1)[-1]
+    if not raw.isdigit() or int(raw) not in ct.DAYS_CHOICES:
+        await callback.answer()
+        return
+    await ct.update_settings(settings.db_path, days=int(raw))
+    await _show_post_chat_picker(callback.message, allow_skip=True)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "contest:post")
+async def callback_contest_post_setup(callback: CallbackQuery) -> None:
+    """Change the channel/group post while the contest is running."""
+    if not await _guard(callback):
+        return
+    await _show_post_chat_picker(callback.message, allow_skip=False)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("contest:pc:"))
+async def callback_contest_post_chat(callback: CallbackQuery, state: FSMContext) -> None:
+    if not await _guard(callback):
+        return
+    raw = callback.data.rsplit(":", 1)[-1]
+    if not raw.isdigit():
+        await callback.answer()
+        return
+    if raw == "0":  # start without a channel post
+        await ct.update_post(settings.db_path, enabled=False)
+        if (await ct.get_contest(settings.db_path))["status"] != "running":
+            await ct.start_contest(settings.db_path)
+        await _show_menu(callback)
+        await callback.answer(texts.CT_STARTED_TOAST)
+        return
+    chosen = next((ch for ch in await get_channels(settings.db_path) if str(ch["id"]) == raw), None)
+    if not chosen:
+        await callback.answer(texts.CHANNEL_ADD_FAILED.split("\n")[0], show_alert=True)
+        return
+    await ct.update_post(
+        settings.db_path,
+        chat_id=str(chosen["channel_id"]),
+        chat_title=chosen["title"] or str(chosen["channel_id"]),
+        last_error=None,
+    )
+    await state.set_state(ContestStates.waiting_post)
+    await callback.message.edit_text(texts.CT_ASK_POST_CONTENT, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.message(ContestStates.waiting_post)
+async def process_post_content(message: Message, state: FSMContext) -> None:
+    """Step 3/3: the admin sends the text, photo or video that will be posted."""
+    if not message.from_user or not is_admin(message.from_user.id):
+        return
+    if message.photo:
+        kind, file_id, limit = "photo", message.photo[-1].file_id, ct.CAPTION_LIMIT
+    elif message.video:
+        kind, file_id, limit = "video", message.video.file_id, ct.CAPTION_LIMIT
+    elif message.text:
+        kind, file_id, limit = "text", None, ct.TEXT_LIMIT
+    else:
+        await message.reply(texts.CT_POST_BAD_TYPE)
+        return
+    body = message.html_text or ""
+    if len(body) > limit:
+        await message.reply(texts.CT_POST_TOO_LONG.format(n=len(body), limit=limit))
+        return
+    await ct.update_post(settings.db_path, kind=kind, body=body, file_id=file_id, last_error=None)
+    await state.clear()
+    buttons = [
+        InlineKeyboardButton(text=texts.CT_POST_INTERVAL_LABEL.format(h=h), callback_data=f"contest:pi:{h}")
+        for h in ct.POST_INTERVAL_CHOICES
+    ]
+    await message.reply(
+        texts.CT_PICK_POST_INTERVAL,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=_picker_rows(buttons, 2) + [_back_row()]),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("contest:pi:"))
+async def callback_contest_post_interval(callback: CallbackQuery) -> None:
+    """Last step: save the interval, start the contest if it is not running yet and post right away."""
+    if not await _guard(callback):
+        return
+    raw = callback.data.rsplit(":", 1)[-1]
+    if not raw.isdigit() or int(raw) not in ct.POST_INTERVAL_CHOICES:
+        await callback.answer()
+        return
+    await ct.update_post(
+        settings.db_path, interval_h=int(raw), enabled=True, last_sent_ts=0, last_error=None
+    )
+    if (await ct.get_contest(settings.db_path))["status"] != "running":
+        await ct.start_contest(settings.db_path)
+    error = await ct.send_post_now(callback.bot, settings.db_path)
     await _show_menu(callback)
-    await callback.answer(texts.CT_STARTED_TOAST)
+    if error:
+        await callback.answer(texts.CT_POST_FAIL.format(error=error), show_alert=True)
+    else:
+        await callback.answer(texts.CT_STARTED_TOAST)
+
+
+@router.callback_query(F.data == "contest:postnow")
+async def callback_contest_post_now(callback: CallbackQuery) -> None:
+    if not await _guard(callback):
+        return
+    error = await ct.send_post_now(callback.bot, settings.db_path)
+    await _show_menu(callback)
+    if error:
+        await callback.answer(texts.CT_POST_FAIL.format(error=error), show_alert=True)
+    else:
+        await callback.answer(texts.CT_POST_SENT_OK)
+
+
+@router.callback_query(F.data == "contest:cancel")
+async def callback_contest_cancel(callback: CallbackQuery) -> None:
+    if not await _guard(callback):
+        return
+    await ct.cancel_contest(settings.db_path)
+    _run_in_background(ct.finalize_posts(callback.bot, settings.db_path, texts.CT_POST_CANCELLED))
+    await _show_menu(callback)
+    await callback.answer(texts.CT_CANCELLED_TOAST)
+
+
+@router.callback_query(F.data == "contest:finish")
+async def callback_contest_finish(callback: CallbackQuery) -> None:
+    if not await _guard(callback):
+        return
+    if await ct.finish_contest(settings.db_path) is None:
+        await callback.answer(texts.CT_NOT_RUNNING_TOAST, show_alert=True)
+        return
+    _run_in_background(ct.finalize_posts(callback.bot, settings.db_path, texts.CT_POST_ENDED))
+    text, markup = await render_result(settings.db_path)
+    await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+    await callback.answer()
 
 
 @router.callback_query(F.data == "contest:announce")
@@ -281,7 +475,7 @@ async def callback_contest_announce_yes(callback: CallbackQuery) -> None:
     await callback.answer()
     await callback.message.edit_text(texts.BROADCAST_PROGRESS)
     announcement = texts.CT_ANNOUNCE.format(
-        prize=texts.CONTEST_PRIZE, winners=cfg["winners_count"], left=left_label(cfg["seconds_left"])
+        prize=texts.CONTEST_PRIZE, winners=cfg["winners_count"], last=ct.last_day_label(cfg)
     )
     result = await ct.broadcast_announcement(callback.bot, settings.db_path, announcement)
     markup = InlineKeyboardMarkup(
@@ -290,27 +484,6 @@ async def callback_contest_announce_yes(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
         texts.CT_ANNOUNCE_DONE.format(sent=result["sent"], blocked=result["blocked"]), reply_markup=markup
     )
-
-
-@router.callback_query(F.data == "contest:cancel")
-async def callback_contest_cancel(callback: CallbackQuery) -> None:
-    if not await _guard(callback):
-        return
-    await ct.cancel_contest(settings.db_path)
-    await _show_menu(callback)
-    await callback.answer(texts.CT_CANCELLED_TOAST)
-
-
-@router.callback_query(F.data == "contest:finish")
-async def callback_contest_finish(callback: CallbackQuery) -> None:
-    if not await _guard(callback):
-        return
-    if await ct.finish_contest(settings.db_path) is None:
-        await callback.answer(texts.CT_NOT_RUNNING_TOAST, show_alert=True)
-        return
-    text, markup = await render_result(settings.db_path)
-    await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
-    await callback.answer()
 
 
 @router.callback_query(F.data == "contest:result")
